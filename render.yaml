@@ -4,7 +4,7 @@ services:
     env: python
     region: oregon
     plan: free
-    buildCommand: "cd frontend && npm install && npm run build && cd ../backend && pip install -r requirements.txt"
+    buildCommand: "cd frontend && npm install && npm run build && cd ../backend && pip install --upgrade pip && pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision && pip install -r requirements.txt"
     startCommand: "cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: PYTHON_VERSION
