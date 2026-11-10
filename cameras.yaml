@@ -1,0 +1,29 @@
+cameras:
+- camera_id: CAM-01-CHUTE
+  source: '0'
+  name: Primary Feed Chute Camera
+  location: Conveyor Belt 1A
+  resolution: 1920x1080
+  fps_target: 30
+  enabled: true
+- camera_id: CAM-02-JAW
+  source: '1'
+  name: Jaw Crusher Throat Camera
+  location: Inlet Hopper 2B
+  resolution: 1920x1080
+  fps_target: 30
+  enabled: true
+- camera_id: CAM-03-TRANSFER
+  source: rtsp://user:pass@192.168.1.100:554/stream1
+  name: Transfer Chute Overband Camera
+  location: Belt 3 Transfer
+  resolution: 1280x720
+  fps_target: 25
+  enabled: false
+output_dir: training_data
+interval_seconds: 5.0
+duration_seconds: null
+max_frames_per_camera: null
+save_metadata: true
+organize_by_date: true
+organize_by_camera: true
