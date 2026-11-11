@@ -1,0 +1,22 @@
+
+ROOMSCALE AI - PHOTO COLLECTION CHECKLIST
+==========================================
+
+[ ] Take 5 photos of your PHONE (different angles/distances)
+[ ] Take 5 photos of your LAPTOP/TABLET
+[ ] Take 5 photos of BOOKS (various sizes)
+[ ] Take 5 photos of MUGS/CUPS
+[ ] Take 5 photos of BOTTLES
+[ ] Take 5 photos of OTHER OBJECTS (mouse, keyboard, remote, etc.)
+[ ] Save all photos to: Desktop\roomscale_photos\
+[ ] Total: ~30+ photos recommended
+
+TIPS FOR BEST RESULTS:
+- Use natural daylight when possible
+- Avoid blurry photos
+- Make sure the whole object is visible
+- Try to include context (desk, table surface)
+- Vary the background when possible
+
+After taking photos, run:
+  python ml/collect_photos.py --input "C:/Users/HP/Desktop/roomscale_photos"

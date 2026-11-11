@@ -24,6 +24,7 @@ from .risk_engine import assess_operational_risk
 from .analytics import get_analytics_kpi_summary, get_trend_analytics
 from .copilot import process_copilot_query
 from .seed_data import seed_database
+from .roomscale_api import router as roomscale_router
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -45,6 +46,9 @@ app.add_middleware(
 
 # Mount media static files directory
 app.mount("/media", StaticFiles(directory=str(DATA_DIR)), name="media")
+
+# Mount RoomScale API router
+app.include_router(roomscale_router)
 
 @app.on_event("startup")
 def startup_event():
