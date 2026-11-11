@@ -1,0 +1,10 @@
+path: C:/Users/HP/.gemini/antigravity/scratch/oresentinel-ai/ml/datasets/rocks_mining/yolo_dataset
+train: images/train
+val: images/val
+names:
+  0: rock
+  1: boulder
+  2: ore_fragment
+  3: gravel
+  4: quarry_debris
+  5: mining_fragment
