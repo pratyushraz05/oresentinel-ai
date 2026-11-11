@@ -39,11 +39,19 @@ backend/data/uploads/*
 # ML Checkpoints, Runs & Large Datasets
 ml/runs/
 ml/dataset/
+ml/dataset_v2/
 backend/ml/dataset/
+backend/ml/dataset_v2/
 backend/ml/weights/runs/
+backend/ml/runs/
 *.cache
 ml/weights/oresentinel_yoloworld.pt
 ml/weights/yolov8n-seg.pt
+ml/weights/oresentinel_yolo.pt
+ml/weights/oresentinel_yolo.onnx
+ml/weights/oresentinel_yolo.torchscript
+ml/weights/oresentinel_yolo_best.pt
+ml/weights/yolov8n.pt
 
 # Frontend / Node
 frontend/node_modules/

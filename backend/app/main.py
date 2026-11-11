@@ -219,7 +219,8 @@ async def run_flagship_demonstration(
             str(raw_path),
             str(annotated_path),
             throat_limit_mm=CONFIG.throat_limit_mm,
-            conveyor_width_mm=CONFIG.conveyor_width_mm
+            conveyor_width_mm=CONFIG.conveyor_width_mm,
+            source_id=effective_source_id
         )
     except Exception as e:
         print(f"Vision detection error: {e}")
@@ -356,7 +357,8 @@ async def process_realtime_frame(
         img,
         calibration_scale=calibration_scale,
         throat_limit_mm=throat_limit_mm,
-        warning_threshold_mm=CONFIG.warning_threshold_mm
+        warning_threshold_mm=CONFIG.warning_threshold_mm,
+        source_id=source_id
     )
 
     alert_triggered = severity in ["CRITICAL_OVERSIZE", "HIGH_RISK"]

@@ -3,8 +3,10 @@ import math
 import cv2
 import numpy as np
 from pathlib import Path
+from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
 from .config import UPLOADS_DIR, FIXTURES_DIR, CONFIG, BASE_DIR
+from .calibration import get_calibration, apply_calibration, CameraCalibration
 
 _yolo_model = None
 
@@ -148,11 +150,13 @@ def detect_boulders_and_measure(
     image_path: str,
     output_annotated_path: str,
     throat_limit_mm: float = None,
-    conveyor_width_mm: float = None
+    conveyor_width_mm: float = None,
+    source_id: str = None
 ) -> list[dict]:
     """
     Step 03: DETECT
     Performs rock segmentation, ellipse fitting, and millimeter physical calibration.
+    Uses camera calibration if available for accurate mm measurements.
     """
     if throat_limit_mm is None:
         throat_limit_mm = CONFIG.throat_limit_mm
@@ -164,9 +168,20 @@ def detect_boulders_and_measure(
         raise ValueError(f"Unable to read image at {image_path}")
 
     h, w = img.shape[:2]
-    # Calibrate scale: assume field of view across image width spans 1600mm
-    # (with standard conveyor belt occupying ~1400mm)
-    mm_per_pixel = 1600.0 / float(w)
+
+    # Try to load camera calibration for accurate measurements
+    calibration: Optional[CameraCalibration] = None
+    if source_id:
+        calibration = get_calibration(source_id)
+
+    if calibration:
+        # Use calibrated mm/pixel and homography
+        mm_per_pixel = calibration.mm_per_pixel_avg
+        print(f"[CALIB] Using calibration for {source_id}: {mm_per_pixel:.4f} mm/px")
+    else:
+        # Fallback: assume field of view across image width spans 1600mm
+        mm_per_pixel = 1600.0 / float(w)
+        print(f"[WARN] No calibration for {source_id}, using fallback: {mm_per_pixel:.4f} mm/px")
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
@@ -640,7 +655,8 @@ def detect_frame_in_memory(
     img: np.ndarray,
     calibration_scale: float = 1.0,
     throat_limit_mm: float = None,
-    warning_threshold_mm: float = None
+    warning_threshold_mm: float = None,
+    source_id: str = None
 ) -> tuple[list[dict], float, str]:
     """
     Rapid in-memory detection for real-time video streaming loops.
@@ -653,8 +669,17 @@ def detect_frame_in_memory(
         warning_threshold_mm = CONFIG.warning_threshold_mm
 
     h, w = img.shape[:2]
-    # Standard conveyor width calibration (1600mm across frame width)
-    mm_per_pixel = (1600.0 / float(w)) * float(calibration_scale)
+
+    # Try to load camera calibration for accurate measurements
+    calibration = None
+    if source_id:
+        calibration = get_calibration(source_id)
+
+    if calibration:
+        mm_per_pixel = calibration.mm_per_pixel_avg
+    else:
+        # Standard conveyor width calibration (1600mm across frame width)
+        mm_per_pixel = (1600.0 / float(w)) * float(calibration_scale)
 
     detections = []
     yolo_model = get_yolo_model()
