@@ -45,6 +45,9 @@ backend/ml/dataset_v2/
 backend/ml/weights/runs/
 backend/ml/runs/
 *.cache
+
+# Runtime calibrations
+backend/calibration/
 ml/weights/oresentinel_yoloworld.pt
 ml/weights/yolov8n-seg.pt
 ml/weights/oresentinel_yolo.pt

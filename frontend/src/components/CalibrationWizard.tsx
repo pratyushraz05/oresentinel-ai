@@ -36,6 +36,8 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
   const [loading, setLoading] = useState(false);
   const cornerOrder = ["Top-Left", "Top-Right", "Bottom-Right", "Bottom-Left"];
   const canvasScaleRef = useRef({ x: 1, y: 1 });
+  // Separate canvas ref for corner selection to avoid conflict with MeasurementWebcamFeed
+  const cornerCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const refWidth = selectedObject?.widthMm || parseFloat(customWidth) || 0;
   const refHeight = selectedObject?.heightMm || parseFloat(customHeight) || 0;
@@ -43,7 +45,23 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
   const canProceed = isCustom ? (refWidth > 0 && refHeight > 0) : !!selectedObject;
   const cornersComplete = corners.length === 4;
 
-  // Capture reference image
+  // Draw captured image to corner canvas when step changes to "corners"
+  React.useEffect(() => {
+    if (step === "corners" && capturedImage && cornerCanvasRef.current) {
+      const cornerCtx = cornerCanvasRef.current.getContext("2d");
+      if (cornerCtx) {
+        const img = new Image();
+        img.src = capturedImage;
+        img.onload = () => {
+          cornerCanvasRef.current!.width = img.width;
+          cornerCanvasRef.current!.height = img.height;
+          cornerCtx.drawImage(img, 0, 0);
+        };
+      }
+    }
+  }, [step, capturedImage]);
+
+  // Capture reference image (uses shared canvasRef)
   const captureReference = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current) return;
 
@@ -76,7 +94,7 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
     setStep("corners");
   }, [videoRef, canvasRef]);
 
-  // Handle corner clicks
+  // Handle corner clicks (uses dedicated cornerCanvasRef)
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (step !== "corners" || cornersComplete) return;
@@ -358,17 +376,18 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
 
               <div className="relative aspect-video bg-black rounded-lg overflow-hidden border border-slate-700">
                 <canvas
-                  ref={canvasRef}
+                  ref={cornerCanvasRef}
                   className="w-full h-full"
                   onClick={handleCanvasClick}
+                  data-corner-canvas="true"
                 />
                 {corners.map((corner, i) => (
                   <div
                     key={i}
                     className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
                     style={{
-                      left: `${(corner[0] / (canvasRef.current?.width || 1)) * 100}%`,
-                      top: `${(corner[1] / (canvasRef.current?.height || 1)) * 100}%`,
+                      left: `${(corner[0] / (cornerCanvasRef.current?.width || 1)) * 100}%`,
+                      top: `${(corner[1] / (cornerCanvasRef.current?.height || 1)) * 100}%`,
                     }}
                   >
                     <div className="w-full h-full bg-emerald-500 rounded-full flex items-center justify-center text-black font-bold text-xs shadow-lg">
@@ -384,10 +403,10 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
                     {corners.slice(0, -1).map((corner, i) => (
                       <svg key={`line-${i}`} className="absolute inset-0 pointer-events-none" style={{ width: "100%", height: "100%" }}>
                         <line
-                          x1={`${(corner[0] / (canvasRef.current?.width || 1)) * 100}%`}
-                          y1={`${(corner[1] / (canvasRef.current?.height || 1)) * 100}%`}
-                          x2={`${(corners[i + 1][0] / (canvasRef.current?.width || 1)) * 100}%`}
-                          y2={`${(corners[i + 1][1] / (canvasRef.current?.height || 1)) * 100}%`}
+                          x1={`${(corner[0] / (cornerCanvasRef.current?.width || 1)) * 100}%`}
+                          y1={`${(corner[1] / (cornerCanvasRef.current?.height || 1)) * 100}%`}
+                          x2={`${(corners[i + 1][0] / (cornerCanvasRef.current?.width || 1)) * 100}%`}
+                          y2={`${(corners[i + 1][1] / (cornerCanvasRef.current?.height || 1)) * 100}%`}
                           stroke="#10b981"
                           strokeWidth="2"
                           strokeDasharray="6,4"
@@ -397,10 +416,10 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
                     {corners.length === 4 && (
                       <svg className="absolute inset-0 pointer-events-none" style={{ width: "100%", height: "100%" }}>
                         <line
-                          x1={`${(corners[3][0] / (canvasRef.current?.width || 1)) * 100}%`}
-                          y1={`${(corners[3][1] / (canvasRef.current?.height || 1)) * 100}%`}
-                          x2={`${(corners[0][0] / (canvasRef.current?.width || 1)) * 100}%`}
-                          y2={`${(corners[0][1] / (canvasRef.current?.height || 1)) * 100}%`}
+                          x1={`${(corners[3][0] / (cornerCanvasRef.current?.width || 1)) * 100}%`}
+                          y1={`${(corners[3][1] / (cornerCanvasRef.current?.height || 1)) * 100}%`}
+                          x2={`${(corners[0][0] / (cornerCanvasRef.current?.width || 1)) * 100}%`}
+                          y2={`${(corners[0][1] / (cornerCanvasRef.current?.height || 1)) * 100}%`}
                           stroke="#10b981"
                           strokeWidth="2"
                           strokeDasharray="6,4"
