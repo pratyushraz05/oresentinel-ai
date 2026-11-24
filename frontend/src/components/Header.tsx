@@ -2,7 +2,7 @@ import React from "react";
 import {
   ShieldAlert, Activity, Sliders, PlayCircle,
   Clock, LayoutDashboard, Database, BarChart3, Sparkles,
-  Camera
+  Camera, Ruler
 } from "lucide-react";
 import type { DashboardSummary } from "../types";
 
@@ -159,6 +159,18 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Camera className="w-4 h-4 text-teal-300" />
             <span>RoomScale</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("measurement")}
+            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === "measurement"
+                ? "bg-emerald-700/60 text-emerald-200 border border-emerald-500/50"
+                : "text-slate-400 hover:text-white hover:bg-[#122823]"
+            }`}
+          >
+            <Ruler className="w-4 h-4 text-emerald-300" />
+            <span>Measurement</span>
           </button>
         </nav>
       </div>

@@ -1,6 +1,9 @@
 import type {
   Incident, DashboardSummary, DashboardTrends, SpecimenFixture, PlantConfig,
-  RealtimeFrameResponse
+  RealtimeFrameResponse,
+  CameraCalibrationData, CalibrationResponse,
+  FeedbackRequest, FeedbackResponse, MeasurementStats,
+  Correction
 } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
@@ -154,5 +157,89 @@ export async function sendRealtimeFrame(
     body: formData,
   });
   if (!res.ok) throw new Error("Failed to process realtime frame");
+  return res.json();
+}
+
+// ===== Measurement API =====
+export async function fetchCalibration(cameraId: string): Promise<CameraCalibrationData | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/api/measurement/calibration/${cameraId}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error("Failed to fetch calibration");
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function computeCalibration(
+  file: Blob,
+  cameraId: string,
+  refWidthMm: number,
+  refHeightMm: number,
+  cornersPx: number[][]
+): Promise<CalibrationResponse> {
+  const formData = new FormData();
+  formData.append("file", file, "calibration_frame.jpg");
+  formData.append("camera_id", cameraId);
+  formData.append("ref_width_mm", refWidthMm.toString());
+  formData.append("ref_height_mm", refHeightMm.toString());
+  formData.append("corners_px", JSON.stringify(cornersPx));
+
+  const res = await fetch(`${BASE_URL}/api/measurement/calibrate`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error("Failed to compute calibration");
+  return res.json();
+}
+
+export async function submitFeedback(request: FeedbackRequest): Promise<FeedbackResponse> {
+  const res = await fetch(`${BASE_URL}/api/measurement/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) throw new Error("Failed to submit feedback");
+  return res.json();
+}
+
+export async function fetchMeasurementStats(cameraId?: string): Promise<MeasurementStats> {
+  const url = cameraId
+    ? `${BASE_URL}/api/measurement/stats?camera_id=${encodeURIComponent(cameraId)}`
+    : `${BASE_URL}/api/measurement/stats`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch measurement stats");
+  return res.json();
+}
+
+export async function fetchCorrections(cameraId?: string, onlyVerified?: boolean): Promise<Correction[]> {
+  const params = new URLSearchParams();
+  if (cameraId) params.append("camera_id", cameraId);
+  if (onlyVerified) params.append("only_verified", "true");
+  const res = await fetch(`${BASE_URL}/api/measurement/feedback?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch corrections");
+  return res.json();
+}
+
+export async function exportTrainingData(format: "json" | "yolo" = "json", onlyVerified: boolean = true): Promise<any> {
+  const res = await fetch(`${BASE_URL}/api/measurement/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ format, only_verified: onlyVerified }),
+  });
+  if (!res.ok) throw new Error("Failed to export training data");
+  if (format === "json") return res.json();
+  return res.json();
+}
+
+export async function getCalibrationFactor(cameraId: string): Promise<{
+  camera_id: string;
+  factor: number;
+  sample_size: number;
+  message?: string;
+}> {
+  const res = await fetch(`${BASE_URL}/api/measurement/calibration/factor/${cameraId}`);
+  if (!res.ok) throw new Error("Failed to fetch calibration factor");
   return res.json();
 }

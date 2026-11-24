@@ -25,6 +25,7 @@ from .analytics import get_analytics_kpi_summary, get_trend_analytics
 from .copilot import process_copilot_query
 from .seed_data import seed_database
 from .roomscale_api import router as roomscale_router
+from .measurement_api import router as measurement_router
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -49,6 +50,9 @@ app.mount("/media", StaticFiles(directory=str(DATA_DIR)), name="media")
 
 # Mount RoomScale API router
 app.include_router(roomscale_router)
+
+# Mount Measurement API router
+app.include_router(measurement_router)
 
 @app.on_event("startup")
 def startup_event():

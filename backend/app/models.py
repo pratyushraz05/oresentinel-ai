@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -112,3 +112,21 @@ class AuditLog(Base):
     details = Column(Text, nullable=True)
 
     incident = relationship("Incident", back_populates="audit_logs")
+
+
+class CameraCalibration(Base):
+    __tablename__ = "camera_calibrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    camera_id = Column(String(100), unique=True, index=True, nullable=False)
+    image_width = Column(Integer, nullable=False)
+    image_height = Column(Integer, nullable=False)
+    ref_object_width_mm = Column(Float, nullable=False)
+    ref_object_height_mm = Column(Float, nullable=False)
+    ref_corners_px = Column(JSON, nullable=False)  # [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+    mm_per_pixel_x = Column(Float, nullable=False)
+    mm_per_pixel_y = Column(Float, nullable=False)
+    mm_per_pixel_avg = Column(Float, nullable=False)
+    homography_matrix = Column(JSON, nullable=False)  # 3x3 matrix
+    calibrated_at = Column(DateTime, default=datetime.utcnow)
+    notes = Column(Text, nullable=True)

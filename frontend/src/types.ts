@@ -175,3 +175,88 @@ export interface PlantConfig {
     resolution: string;
   }[];
 }
+
+// ===== Measurement Feature Types =====
+export interface Measurement {
+  id: string;
+  timestamp: string;
+  imageDataUrl: string;
+  bbox: [number, number, number, number];
+  predictedWidthMm: number;
+  predictedHeightMm: number;
+  confidence: number;
+  calibrationScale: number;
+  throatLimitMm: number;
+  cameraId: string;
+  detection: RealtimeDetectionBox;
+}
+
+export interface Correction extends Measurement {
+  actualWidthMm: number;
+  actualHeightMm: number;
+  errorWidthMm: number;
+  errorHeightMm: number;
+  errorPercent: number;
+  userVerified: boolean;
+}
+
+export interface CameraCalibrationData {
+  cameraId: string;
+  mmPerPixelX: number;
+  mmPerPixelY: number;
+  mmPerPixelAvg: number;
+  homographyMatrix: number[][];
+  refObjectWidthMm: number;
+  refObjectHeightMm: number;
+  calibratedAt: string;
+  imageWidth: number;
+  imageHeight: number;
+}
+
+export interface CalibrationRequest {
+  cameraId: string;
+  refWidthMm: number;
+  refHeightMm: number;
+  cornersPx: number[][];
+  imageWidth: number;
+  imageHeight: number;
+}
+
+export interface CalibrationResponse {
+  success: boolean;
+  calibration: CameraCalibrationData | null;
+  mmPerPixel: number;
+  message?: string;
+}
+
+export interface FeedbackRequest {
+  measurement_id: string;
+  camera_id: string;
+  image_data_url: string;
+  bbox: [number, number, number, number];
+  predicted_width_mm: number;
+  predicted_height_mm: number;
+  confidence: number;
+  calibration_scale: number;
+  throat_limit_mm: number;
+  actual_width_mm: number;
+  actual_height_mm: number;
+  user_verified: boolean;
+  detection_model: string;
+  detection_confidence: number;
+  timestamp: string;
+}
+
+export interface FeedbackResponse {
+  success: boolean;
+  correction_id?: number;
+  message: string;
+}
+
+export interface MeasurementStats {
+  totalMeasurements: number;
+  verifiedMeasurements: number;
+  meanAbsoluteErrorMm: number;
+  meanAbsolutePercentError: number;
+  byObjectType: Record<string, { count: number; mae: number }>;
+}

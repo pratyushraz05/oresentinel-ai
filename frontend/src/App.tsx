@@ -7,6 +7,7 @@ import { AnalyticsView } from "./components/AnalyticsView";
 import { CopilotView } from "./components/CopilotView";
 import { SettingsModal } from "./components/SettingsModal";
 import { RoomScaleView } from "./views/RoomScaleView";
+import { MeasurementView } from "./views/MeasurementView";
 import type {
   Incident, DashboardSummary, DashboardTrends, SpecimenFixture, PlantConfig
 } from "./types";
@@ -124,6 +125,10 @@ export function App() {
 
         {activeTab === "roomscale" && (
           <RoomScaleView />
+        )}
+
+        {activeTab === "measurement" && (
+          <MeasurementView />
         )}
       </main>
 

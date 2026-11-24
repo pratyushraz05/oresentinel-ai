@@ -16,7 +16,7 @@ export const RoomScaleView: React.FC = () => {
 
   // Load dataset stats
   useEffect(() => {
-    fetch('http://localhost:8000/api/roomscale/dataset-stats')
+    fetch('/api/roomscale/dataset-stats')
       .then(r => r.json())
       .then(data => {
         setStats(data);
@@ -69,7 +69,7 @@ export const RoomScaleView: React.FC = () => {
             onCapture={() => {
               // Refresh stats after capture
               setTimeout(() => {
-                fetch('http://localhost:8000/api/roomscale/dataset-stats')
+                fetch('/api/roomscale/dataset-stats')
                   .then(r => r.json())
                   .then(data => setStats(data));
               }, 1000);
@@ -88,7 +88,7 @@ export const RoomScaleView: React.FC = () => {
             
             <div className="space-y-3">
               <button
-                onClick={() => window.open('http://localhost:8000/api/roomscale/dataset-stats', '_blank')}
+                onClick={() => window.open('/api/roomscale/dataset-stats', '_blank')}
                 className="w-full px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-left text-sm transition-colors"
               >
                 View Dataset Statistics
@@ -106,7 +106,7 @@ export const RoomScaleView: React.FC = () => {
               </button>
               
               <button
-                onClick={() => window.open('http://localhost:8000/docs', '_blank')}
+                onClick={() => window.open('/docs', '_blank')}
                 className="w-full px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-left text-sm transition-colors"
               >
                 API Documentation

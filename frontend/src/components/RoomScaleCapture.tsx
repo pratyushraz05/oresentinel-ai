@@ -48,36 +48,51 @@ export const RoomScaleCapture: React.FC<PhotoCaptureProps> = ({ onCapture }) => 
     const video = videoRef.current;
     const canvas = canvasRef.current;
     
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Draw frame
-    ctx.drawImage(video, 0, 0);
-    
-    // Add watermark
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(0, canvas.height - 30, canvas.width, 30);
-    ctx.fillStyle = '#fff';
-    ctx.font = '14px monospace';
-    ctx.fillText(`RoomScale AI | Capture #${captureCount + 1} | ${new Date().toLocaleTimeString()}`, 10, canvas.height - 10);
-
-    // Get blob for upload
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
+    setCapturing(true);
+    try {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
       
-      const url = URL.createObjectURL(blob);
-      setLastCapture(url);
-      
-      // Upload to backend
-      await uploadToBackend(blob);
-      
-      if (onCapture) {
-        onCapture(url);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        setCapturing(false);
+        return;
       }
-    }, 'image/jpeg', 0.9);
+
+      // Draw frame
+      ctx.drawImage(video, 0, 0);
+      
+      // Add watermark
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(0, canvas.height - 30, canvas.width, 30);
+      ctx.fillStyle = '#fff';
+      ctx.font = '14px monospace';
+      ctx.fillText(`RoomScale AI | Capture #${captureCount + 1} | ${new Date().toLocaleTimeString()}`, 10, canvas.height - 10);
+
+      // Get blob for upload
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          setCapturing(false);
+          return;
+        }
+        
+        const url = URL.createObjectURL(blob);
+        setLastCapture(url);
+        
+        // Upload to backend
+        try {
+          await uploadToBackend(blob);
+        } finally {
+          setCapturing(false);
+        }
+        
+        if (onCapture) {
+          onCapture(url);
+        }
+      }, 'image/jpeg', 0.9);
+    } catch {
+      setCapturing(false);
+    }
   };
 
   // Upload to backend
@@ -88,7 +103,7 @@ export const RoomScaleCapture: React.FC<PhotoCaptureProps> = ({ onCapture }) => 
       const formData = new FormData();
       formData.append('file', blob, `capture_${Date.now()}.jpg`);
       
-      const response = await fetch('http://localhost:8000/api/roomscale/capture-snapshot', {
+      const response = await fetch('/api/roomscale/capture-snapshot', {
         method: 'POST',
         body: formData
       });
