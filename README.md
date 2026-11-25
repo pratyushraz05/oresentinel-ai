@@ -32,6 +32,141 @@ OreSentinel AI bridges the gap between raw computer vision boulder detection and
 
 ---
 
+## 💻 New Laptop Setup Instructions (Step-by-Step)
+
+Follow this complete walkthrough to set up and run OreSentinel AI from scratch on a **brand new laptop** (Windows, macOS, or Linux).
+
+### 1. Prerequisites Installation
+Before setting up the project, install the following three tools on your laptop:
+
+1. **Git**: Download and install from [git-scm.com](https://git-scm.com/downloads).
+2. **Python (3.10 - 3.12+)**: Download from [python.org](https://www.python.org/downloads/).  
+   > ⚠️ **Windows Critical Step**: During Python installation, make sure to check the box:  
+   > **`☑ Add python.exe to PATH`** before clicking "Install Now".
+3. **Node.js (LTS version 18 or 20+)**: Download from [nodejs.org](https://nodejs.org/).  
+   *(npm package manager is included automatically).*
+
+---
+
+### 2. Clone the Repository
+Open your terminal (PowerShell, Command Prompt, or Terminal on macOS/Linux) and clone the project:
+
+```bash
+git clone https://github.com/pratyushraz05/oresentinel-ai.git
+cd oresentinel-ai
+```
+
+---
+
+### 3. Backend Setup (Python Virtual Environment)
+
+#### 🪟 Windows (PowerShell):
+```powershell
+# 1. If script execution is restricted on a new Windows laptop, run:
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+# 2. Create Python virtual environment:
+python -m venv venv
+
+# 3. Activate the virtual environment:
+.\venv\Scripts\Activate.ps1
+
+# 4. Install backend dependencies (FastAPI, YOLOv8, OpenCV, PyTorch, etc.):
+pip install -r backend/requirements.txt
+```
+
+#### 🍎 macOS / 🐧 Linux / WSL:
+```bash
+# 1. Create Python virtual environment:
+python3 -m venv venv
+
+# 2. Activate the virtual environment:
+source venv/bin/activate
+
+# 3. Install backend dependencies:
+pip install -r backend/requirements.txt
+```
+
+---
+
+### 4. Frontend Setup & Production Build
+
+In the same project folder, install frontend packages and compile the React application:
+
+```bash
+# Navigate to frontend directory
+cd frontend
+
+# Install dependencies (React 19, Vite, Tailwind CSS, Lucide icons, etc.)
+npm install
+
+# Build static production assets into frontend/dist
+npm run build
+
+# Return to the project root directory
+cd ..
+```
+
+---
+
+### 5. Launch the Full-Stack Application
+
+Run the unified full-stack launcher from the root folder:
+
+```bash
+# Ensure your virtual environment is active (you see (venv) in terminal)
+python run_app.py
+```
+
+The unified server will start on port `8080`:
+- **Web Interface**: Open your browser to **[http://localhost:8080](http://localhost:8080)**.
+- Both the FastAPI backend and React frontend are served simultaneously.
+
+*(Optional: To run on a different port, set the PORT variable: `$env:PORT=8000; python run_app.py` on Windows or `PORT=8000 python run_app.py` on macOS/Linux).*
+
+---
+
+### 6. First-Time Camera & Calibration Walkthrough
+
+Once opened in your web browser:
+
+1. **Allow Webcam Permissions**: When prompted by your browser, click **"Allow"** to grant camera access.
+2. **Initial Camera Calibration (Measurement Tab)**:
+   - Click the **"Measurement"** tab in the top navigation bar.
+   - Click **"Connect Camera"**.
+   - **Step 1: Calibration & Sizing Setup modal**:
+     - Enter camera-to-object distance (e.g. `50 cm` or select a preset).
+     - Enter reference block sizing: **Length (cm)** and **Breadth (cm)**. The live **Surface Area (cm²)** calculates automatically at the bottom.
+     - Click **"Confirm Setup & Start Detection"**.
+3. **If Camera Auto-Detection Needs Manual Adjustment**:
+   - If your object has unusual shape, lighting, or background:
+   - Click the **"Select Rectangle"** button on the camera view.
+   - Click and drag directly on the camera screen to draw a custom rectangle over your object.
+   - Enter actual **Length (cm)** and **Breadth (cm)** and click **"Calibrate System on This Rectangle & Save"**.
+   - The physical millimeter scale is saved globally across the entire system.
+4. **Run the 9-Step Journey with Laptop Camera**:
+   - Navigate to the **"9-Step Journey"** tab.
+   - Click the **"Laptop Cam"** mode.
+   - The camera automatically applies your calibrated scale and distance.
+   - Hold an object in front of the camera:
+     - As it tracks the object moving towards the crusher, it re-measures continuously across **4 consecutive frames** (`Check 1/4`, `2/4`, `3/4`, `4/4: Verified Oversize!`).
+     - Once confirmed, the SCADA alarm sounds, the conveyor feed is held, the traceable incident is created in the database, and operator mitigation instructions (**Divert Chute** or **SCADA Trip**) appear.
+
+---
+
+### 7. Common Troubleshooting on New Laptops
+
+| Issue | Cause | Solution |
+| :--- | :--- | :--- |
+| **`Activate.ps1 cannot be loaded because running scripts is disabled`** | Windows PowerShell default security policy | Run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`, then re-run `.\venv\Scripts\Activate.ps1`. |
+| **`python: command not found`** | Python not added to PATH | Reinstall Python from python.org and check **"Add python.exe to PATH"**, or use the full path to `python.exe`. |
+| **`npm: command not found`** | Node.js not installed or terminal not refreshed | Install Node.js from nodejs.org, close and re-open your terminal window. |
+| **`Port 8080 already in use`** | Another application is using port 8080 | Run on port 8081: `$env:PORT=8081; python run_app.py` (Windows) or `PORT=8081 python run_app.py` (Mac/Linux). |
+| **Webcam stream is black or permission denied** | OS or browser privacy settings blocking camera | In Windows Settings &rarr; Privacy & Security &rarr; Camera, ensure **"Let desktop apps access your camera"** is enabled. In browser, verify camera permission is set to "Allow" for `http://localhost:8080`. |
+| **YOLO model downloading on first run** | First-time model weight initialization | The system downloads base weights on first startup; ensure internet access during initial run. |
+
+---
+
 ## 🚀 Quick Start Guide
 
 ### 1. Prerequisites
