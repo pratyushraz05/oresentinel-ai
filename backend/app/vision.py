@@ -651,6 +651,116 @@ def generate_synthetic_industrial_specimens():
         cv2.imwrite(str(file_path), img)
 
 
+def detect_full_salient_object(
+    img: np.ndarray,
+    mm_per_pixel: float,
+    throat_limit_mm: float,
+    warning_threshold_mm: float
+) -> Optional[dict]:
+    """
+    Specifically extracts the full prominent foreground object inside the camera frame
+    for physical measurement & calibration mode. Encloses the entire object boundary
+    using bilateral edge filtering, Otsu thresholding, morphological closing, and convex hull.
+    """
+    h, w = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Bilateral filter preserves object boundaries while smoothing internal texture
+    filtered = cv2.bilateralFilter(gray, 9, 75, 75)
+
+    # Combine Otsu and Adaptive thresholding for robust contrast separation
+    _, otsu = cv2.threshold(filtered, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    adaptive = cv2.adaptiveThreshold(filtered, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 4)
+    combined = cv2.bitwise_or(otsu, adaptive)
+
+    # Zero out outer 4% borders to remove frame edge artifacts
+    m_y = max(8, int(h * 0.04))
+    m_x = max(8, int(w * 0.04))
+    combined[:m_y, :] = 0
+    combined[-m_y:, :] = 0
+    combined[:, :m_x] = 0
+    combined[:, -m_x:] = 0
+
+    # Large morphological kernel to merge fragmented edges into one cohesive object body
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+    closed = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+
+    total_area = float(w * h)
+    valid_candidates = []
+    center_x, center_y = w / 2.0, h / 2.0
+
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < (total_area * 0.015) or area > (total_area * 0.85):
+            continue
+
+        hull = cv2.convexHull(cnt)
+        hull_area = cv2.contourArea(hull)
+        if hull_area <= 0:
+            continue
+
+        x, y, bw, bh = cv2.boundingRect(hull)
+        # Avoid bounding boxes hugging the very edge of the camera
+        if bw >= (w - 2 * m_x) and bh >= (h - 2 * m_y):
+            continue
+
+        # Distance to center (prefer objects positioned in target area)
+        obj_center_x = x + bw / 2.0
+        obj_center_y = y + bh / 2.0
+        dist_to_center = math.hypot(obj_center_x - center_x, obj_center_y - center_y)
+
+        # Score balances prominence and centrality
+        score = area / (1.0 + (dist_to_center / w))
+        valid_candidates.append((score, hull, (x, y, bw, bh)))
+
+    if not valid_candidates:
+        return None
+
+    valid_candidates.sort(key=lambda item: item[0], reverse=True)
+    best_score, best_hull, (x, y, bw, bh) = valid_candidates[0]
+
+    rect = cv2.minAreaRect(best_hull)
+    _, (dim_w, dim_h), _ = rect
+    major_px = max(dim_w, dim_h, bw, bh)
+    minor_px = max(1.0, min(dim_w, dim_h, bw, bh))
+    major_mm = round(major_px * mm_per_pixel, 1)
+    minor_mm = round(minor_px * mm_per_pixel, 1)
+    aspect_ratio = round(major_mm / max(1.0, minor_mm), 2)
+
+    a_m = major_mm / 2000.0
+    b_m = minor_mm / 2000.0
+    c_m = (major_mm + minor_mm) / 4000.0
+    vol_m3 = (4.0 / 3.0) * math.pi * a_m * b_m * c_m
+    vol_dm3 = round(vol_m3 * 1000.0, 2)
+    mass_kg = round(vol_m3 * 3100.0, 1)
+
+    is_oversize = major_mm >= throat_limit_mm
+    is_warning = not is_oversize and (major_mm >= warning_threshold_mm or aspect_ratio >= 2.0)
+
+    return {
+        "rock_index": 1,
+        "bbox": [
+            round(float(x) / w, 4),
+            round(float(y) / h, 4),
+            round(float(bw) / w, 4),
+            round(float(bh) / h, 4)
+        ],
+        "major_axis_mm": major_mm,
+        "minor_axis_mm": minor_mm,
+        "aspect_ratio": aspect_ratio,
+        "estimated_volume_dm3": vol_dm3,
+        "estimated_mass_kg": mass_kg,
+        "confidence": 0.95,
+        "is_oversize": is_oversize,
+        "is_warning": is_warning,
+        "model_name": "Full-Object-Salient-Detector"
+    }
+
+
 def detect_frame_in_memory(
     img: np.ndarray,
     calibration_scale: float = 1.0,
@@ -895,6 +1005,19 @@ def detect_frame_in_memory(
                 rock_idx += 1
                 if rock_idx > 8:
                     break
+
+        # For measurement mode or if no object detected, extract full salient foreground object
+        if source_id == "CAM-WEBCAM-MEASURE" or len(detections) == 0:
+            salient_obj = detect_full_salient_object(img, mm_per_pixel, throat_limit_mm, warning_threshold_mm)
+            if salient_obj:
+                if source_id == "CAM-WEBCAM-MEASURE":
+                    # Place full salient object as primary detection for accurate whole-object sizing
+                    detections.insert(0, salient_obj)
+                    # Re-index rocks
+                    for i, d in enumerate(detections, 1):
+                        d["rock_index"] = i
+                elif len(detections) == 0:
+                    detections.append(salient_obj)
 
     max_caliber = max([d["major_axis_mm"] for d in detections], default=0.0)
     has_oversize = any(d["is_oversize"] for d in detections)

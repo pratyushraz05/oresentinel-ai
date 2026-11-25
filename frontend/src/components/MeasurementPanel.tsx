@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import {
-  CheckCircle2, XCircle, Save, Download, Trash2,
+  CheckCircle2, Save, Download, Trash2,
   Info, AlertTriangle, Ruler, Target,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, Edit3, RefreshCw, Zap
 } from "lucide-react";
 import type { Measurement, Correction, RealtimeDetectionBox, MeasurementStats, FeedbackRequest } from "../types";
 import { formatMeasurement, getSeverityLabel, calculateError } from "../utils/measurementEngine";
@@ -19,6 +19,12 @@ interface MeasurementPanelProps {
   onCorrectionSubmit: (correction: Correction) => void;
   onCalibrationClick: () => void;
   onClearClick: () => void;
+  isAdjustingBox?: boolean;
+  setIsAdjustingBox?: (val: boolean) => void;
+  customBox?: [number, number, number, number] | null;
+  onDirectRecalibrate?: (actualWidthCm: number, actualHeightCm: number) => Promise<any>;
+  recalibrationCount?: number;
+  calibMmPerPx?: number;
 }
 
 export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
@@ -31,12 +37,25 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
   onCorrectionSubmit,
   onCalibrationClick,
   onClearClick,
+  isAdjustingBox = false,
+  setIsAdjustingBox,
+  customBox = null,
+  onDirectRecalibrate,
+  recalibrationCount = 0,
+  calibMmPerPx = 0.8,
 }) => {
   const [showCorrection, setShowCorrection] = useState(false);
   const [correctionWidth, setCorrectionWidth] = useState("");
   const [correctionHeight, setCorrectionHeight] = useState("");
-  const [correctionUnit, setCorrectionUnit] = useState<"mm" | "cm" | "m">("mm");
+  const [correctionUnit, setCorrectionUnit] = useState<"mm" | "cm" | "m">("cm");
   const [saving, setSaving] = useState(false);
+  const [recalibrating, setRecalibrating] = useState(false);
+  const [recalibrationSuccess, setRecalibrationSuccess] = useState<string | null>(null);
+
+  // Recalibration inputs in Centimeters (cm)
+  const [actualWidthCmInput, setActualWidthCmInput] = useState<string>("");
+  const [actualHeightCmInput, setActualHeightCmInput] = useState<string>("");
+
   const [stats, setStats] = useState<MeasurementStats | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -45,6 +64,42 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
   React.useEffect(() => {
     computeLocalStats().then(setStats);
   }, []);
+
+  // Set default recalibration inputs when measurement or customBox changes
+  React.useEffect(() => {
+    if (measurement) {
+      if (!actualWidthCmInput) {
+        setActualWidthCmInput((measurement.predictedWidthMm / 10).toFixed(1));
+      }
+      if (!actualHeightCmInput) {
+        setActualHeightCmInput((measurement.predictedHeightMm / 10).toFixed(1));
+      }
+    }
+  }, [measurement]);
+
+  // Handle direct continuous recalibration on user adjusted box
+  const handleRecalibrateClick = async () => {
+    if (!onDirectRecalibrate) return;
+    const wCm = parseFloat(actualWidthCmInput);
+    const hCm = parseFloat(actualHeightCmInput);
+
+    if (isNaN(wCm) || isNaN(hCm) || wCm <= 0 || hCm <= 0) {
+      alert("Please enter valid width and height in centimeters (e.g. 25.0 cm).");
+      return;
+    }
+
+    setRecalibrating(true);
+    setRecalibrationSuccess(null);
+    try {
+      await onDirectRecalibrate(wCm, hCm);
+      setRecalibrationSuccess(`Iteration #${recalibrationCount + 1} calibrated successfully! Scale updated to ${((calibMmPerPx || 0.8) / 10).toFixed(4)} cm/px.`);
+      setTimeout(() => setRecalibrationSuccess(null), 6000);
+    } catch (err: any) {
+      alert(`Recalibration failed: ${err.message || "Unknown error"}`);
+    } finally {
+      setRecalibrating(false);
+    }
+  };
 
   // Handle correction submit
   const handleSubmitCorrection = async (userVerified: boolean, usePredicted: boolean = false) => {
@@ -109,10 +164,8 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
 
     setSaving(true);
     try {
-      // Save locally first
       await saveCorrection(correction);
 
-      // Also submit to backend for training data collection
       try {
         await submitFeedback(feedbackRequest);
       } catch (backendErr) {
@@ -125,7 +178,7 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
       setCorrectionHeight("");
       setStats(await computeLocalStats());
       alert(userVerified
-        ? "Thank you! Your verified correction has been saved and will improve future measurements."
+        ? "✓ Thank you! Bounding box and object measurement verified. Recorded to system training database."
         : "Correction saved. Mark as verified when you confirm the actual dimensions."
       );
     } catch (err) {
@@ -191,7 +244,7 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Ruler className="w-5 h-5 text-emerald-400" />
-            <span className="text-white font-semibold">Live Measurement</span>
+            <span className="text-white font-semibold">Object Measurement</span>
             <span className={`px-2 py-0.5 rounded text-xs font-mono font-bold ${isOversize ? "bg-rose-500/20 text-rose-400" : isWarning ? "bg-amber-500/20 text-amber-400" : "bg-emerald-500/20 text-emerald-400"}`}>
               {severity.label}
             </span>
@@ -201,67 +254,213 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
           </span>
         </div>
 
+        {/* Primary Centimeter (cm) Readout */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="p-3 bg-slate-900/50 rounded-lg border border-slate-700">
-            <div className="text-xs text-slate-400">Width</div>
-            <div className="text-2xl font-bold font-mono text-white">
-              {formatMeasurement(measurement.predictedWidthMm)}
+          <div className="p-3 bg-slate-900/60 rounded-xl border border-emerald-900/60 shadow-inner">
+            <div className="text-xs font-mono uppercase text-slate-400">Width</div>
+            <div className="text-2xl font-black font-mono text-emerald-300">
+              {(measurement.predictedWidthMm / 10).toFixed(1)} <span className="text-sm font-normal text-emerald-500">cm</span>
             </div>
-            <div className="text-[10px] text-slate-500">± {Math.round((measurement.detection.bbox[2] || 0.1) * 640 * 0.1)} px</div>
-          </div>
-          <div className="p-3 bg-slate-900/50 rounded-lg border border-slate-700">
-            <div className="text-xs text-slate-400">Height</div>
-            <div className="text-2xl font-bold font-mono text-white">
-              {formatMeasurement(measurement.predictedHeightMm)}
-            </div>
-            <div className="text-[10px] text-slate-500">± {Math.round((measurement.detection.bbox[3] || 0.1) * 480 * 0.1)} px</div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 pt-2">
-          <div className="p-2 bg-slate-900/30 rounded border border-slate-800">
-            <div className="text-xs text-slate-400">Major Axis</div>
-            <div className="text-lg font-bold font-mono text-white">
-              {formatMeasurement(Math.max(measurement.predictedWidthMm, measurement.predictedHeightMm))}
+            <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+              {Math.round(measurement.predictedWidthMm)} mm <span className="text-[10px] text-slate-600">± {Math.round((measurement.detection.bbox[2] || 0.1) * 640 * 0.1)}px</span>
             </div>
           </div>
-          <div className="p-2 bg-slate-900/30 rounded border border-slate-800">
-            <div className="text-xs text-slate-400">Minor Axis</div>
-            <div className="text-lg font-bold font-mono text-white">
-              {formatMeasurement(Math.min(measurement.predictedWidthMm, measurement.predictedHeightMm))}
+          <div className="p-3 bg-slate-900/60 rounded-xl border border-emerald-900/60 shadow-inner">
+            <div className="text-xs font-mono uppercase text-slate-400">Height</div>
+            <div className="text-2xl font-black font-mono text-emerald-300">
+              {(measurement.predictedHeightMm / 10).toFixed(1)} <span className="text-sm font-normal text-emerald-500">cm</span>
+            </div>
+            <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+              {Math.round(measurement.predictedHeightMm)} mm <span className="text-[10px] text-slate-600">± {Math.round((measurement.detection.bbox[3] || 0.1) * 480 * 0.1)}px</span>
             </div>
           </div>
         </div>
 
-        {/* Detection Info */}
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-800">
+            <div className="text-[11px] text-slate-400">Major Caliber</div>
+            <div className="text-lg font-bold font-mono text-white">
+              {(Math.max(measurement.predictedWidthMm, measurement.predictedHeightMm) / 10).toFixed(1)} cm
+              <span className="text-[10px] text-slate-500 block font-normal font-sans">
+                ({Math.round(Math.max(measurement.predictedWidthMm, measurement.predictedHeightMm))} mm)
+              </span>
+            </div>
+          </div>
+          <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-800">
+            <div className="text-[11px] text-slate-400">Minor Caliber</div>
+            <div className="text-lg font-bold font-mono text-white">
+              {(Math.min(measurement.predictedWidthMm, measurement.predictedHeightMm) / 10).toFixed(1)} cm
+              <span className="text-[10px] text-slate-500 block font-normal font-sans">
+                ({Math.round(Math.min(measurement.predictedWidthMm, measurement.predictedHeightMm))} mm)
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Detection Metadata */}
         <div className="p-2 bg-slate-900/30 rounded border border-slate-800 text-[10px] text-slate-400 grid grid-cols-2 gap-2">
-          <div>Model: <span className="text-slate-300 font-mono">{detection.model_name}</span></div>
-          <div>Class: <span className="text-slate-300">Rock #{detection.rock_index}</span></div>
-          <div>Aspect: <span className="text-slate-300 font-mono">{detection.aspect_ratio.toFixed(2)}</span></div>
-          <div>Mass: <span className="text-slate-300 font-mono">~{Math.round(detection.estimated_mass_kg)} kg</span></div>
+          <div>Detector: <span className="text-slate-300 font-mono">{detection.model_name.includes("YOLO") ? "YOLOv8 Segmentation" : "Salient Full Object"}</span></div>
+          <div>Target: <span className="text-slate-300">Object #{detection.rock_index}</span></div>
+          <div>Aspect Ratio: <span className="text-slate-300 font-mono">{detection.aspect_ratio.toFixed(2)}:1</span></div>
+          <div>Est. Mass: <span className="text-slate-300 font-mono">~{Math.round(detection.estimated_mass_kg)} kg</span></div>
         </div>
       </div>
 
-      {/* Feedback Buttons */}
-      <div className="pt-2 border-t border-slate-800">
-        <p className="text-xs text-slate-400 text-center mb-2">Is this measurement correct?</p>
+      {/* Verification: User feedback on bounding box correctness */}
+      <div className="p-3 bg-[#0a1b18] border border-emerald-700/60 rounded-xl space-y-2.5">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
+          <Target className="w-4 h-4 text-emerald-400" />
+          <span>Object Detection Verification</span>
+        </div>
+        <p className="text-xs text-slate-300">
+          Is the system circling or framing this object correctly?
+        </p>
         <div className="flex gap-2">
           <button
             onClick={() => handleSubmitCorrection(true, true)}
             disabled={saving}
-            className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+            className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow"
           >
-            <CheckCircle2 className="w-4 h-4" />
-            Yes, Correct
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Yes, Box is Correct
           </button>
           <button
-            onClick={() => setShowCorrection(true)}
-            className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            onClick={() => {
+              if (setIsAdjustingBox) setIsAdjustingBox(true);
+            }}
+            className="flex-1 py-2 px-3 bg-cyan-700 hover:bg-cyan-600 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow"
           >
-            <XCircle className="w-4 h-4" />
-            No, Fix It
+            <Edit3 className="w-3.5 h-3.5" />
+            Adjust / Redraw Box
           </button>
         </div>
+      </div>
+
+      {/* Interactive Box Adjustment & Continuous Recalibration Section */}
+      {isAdjustingBox && (
+        <div className="p-4 bg-[#071a1f] border-2 border-cyan-500 rounded-xl space-y-3.5 shadow-xl animate-in fade-in">
+          <div className="flex items-center justify-between pb-2 border-b border-cyan-800/60">
+            <div className="flex items-center gap-2 text-cyan-300 font-semibold text-xs uppercase tracking-wider font-mono">
+              <Zap className="w-4 h-4 text-cyan-400 animate-pulse" />
+              <span>Continuous Recalibration</span>
+            </div>
+            <span className="px-2 py-0.5 bg-cyan-900/60 border border-cyan-700 rounded text-[10px] font-mono text-cyan-300">
+              Iter #{recalibrationCount + 1}
+            </span>
+          </div>
+
+          <div className="text-xs text-slate-300 space-y-1">
+            <p className="font-medium text-cyan-200">
+              1. Draw the tight rectangle over the object on the camera screen.
+            </p>
+            <p className="text-slate-400 text-[11px]">
+              2. Enter the actual real-world dimensions below in centimeters.
+            </p>
+          </div>
+
+          {/* Actual Dimension Inputs (in Centimeters) */}
+          <div className="grid grid-cols-2 gap-2.5">
+            <div>
+              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                Actual Width (cm)
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  value={actualWidthCmInput}
+                  onChange={(e) => setActualWidthCmInput(e.target.value)}
+                  placeholder="e.g. 25.0"
+                  className="w-full px-3 py-2 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-sm focus:border-cyan-400 focus:outline-none"
+                />
+                <span className="absolute right-3 top-2 text-xs font-mono text-cyan-500">cm</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                Actual Height (cm)
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  value={actualHeightCmInput}
+                  onChange={(e) => setActualHeightCmInput(e.target.value)}
+                  placeholder="e.g. 18.0"
+                  className="w-full px-3 py-2 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-sm focus:border-cyan-400 focus:outline-none"
+                />
+                <span className="absolute right-3 top-2 text-xs font-mono text-cyan-500">cm</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Custom Drawn Box Coordinates Info */}
+          {customBox && (
+            <div className="p-2 bg-slate-900/80 border border-cyan-800/60 rounded-lg text-[10px] font-mono text-cyan-300 flex justify-between items-center">
+              <span>Target ROI:</span>
+              <span>
+                X:{(customBox[0] * 100).toFixed(0)}% Y:{(customBox[1] * 100).toFixed(0)}% | W:{(customBox[2] * 100).toFixed(0)}% H:{(customBox[3] * 100).toFixed(0)}%
+              </span>
+            </div>
+          )}
+
+          {/* Recalibration Status Message */}
+          {recalibrationSuccess && (
+            <div className="p-2.5 bg-emerald-950/70 border border-emerald-600 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{recalibrationSuccess}</span>
+            </div>
+          )}
+
+          {/* Action Button: Recalibrate */}
+          <div className="space-y-2 pt-1">
+            <button
+              onClick={handleRecalibrateClick}
+              disabled={recalibrating || !actualWidthCmInput || !actualHeightCmInput}
+              className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md disabled:opacity-50"
+            >
+              {recalibrating ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Computing Homography &amp; Recalibrating...</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4 fill-current" />
+                  <span>Recalibrate System on This Object</span>
+                </>
+              )}
+            </button>
+
+            {setIsAdjustingBox && (
+              <button
+                onClick={() => setIsAdjustingBox(false)}
+                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+              >
+                ✓ Finish Adjustment &amp; Resume Live Feed
+              </button>
+            )}
+          </div>
+
+          <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between pt-1">
+            <span>Active Scale:</span>
+            <span className="text-cyan-400 font-bold">{((calibMmPerPx || 0.8) / 10).toFixed(4)} cm/pixel</span>
+          </div>
+        </div>
+      )}
+
+      {/* Traditional Correction / Fine-tune modal trigger */}
+      <div className="flex justify-between items-center pt-1 border-t border-slate-800 text-xs text-slate-400">
+        <span>Manual override log:</span>
+        <button
+          onClick={() => setShowCorrection(true)}
+          className="text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+        >
+          Submit numeric correction
+        </button>
       </div>
 
       {/* Correction Modal */}

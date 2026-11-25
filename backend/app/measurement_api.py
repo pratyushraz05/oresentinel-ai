@@ -31,6 +31,15 @@ class CalibrationRequest(BaseModel):
     imageWidth: int
     imageHeight: int
 
+class DirectCalibrationRequest(BaseModel):
+    camera_id: str = "CAM-WEBCAM-MEASURE"
+    box: List[float]  # [x, y, w, h] normalized or pixel coordinates
+    actual_width_cm: float
+    actual_height_cm: float
+    image_width: int = 1280
+    image_height: int = 720
+    notes: Optional[str] = "Interactive user rectangle calibration"
+
 class CalibrationResponse(BaseModel):
     success: bool
     calibration: Optional[dict] = None
@@ -247,6 +256,128 @@ async def compute_calibration_endpoint(
         raise HTTPException(status_code=400, detail="Invalid corners JSON format")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/calibrate/direct", response_model=CameraCalibrationSchema)
+async def direct_calibration_endpoint(
+    req: DirectCalibrationRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Directly recalibrates the measurement camera using the user's adjusted or drawn rectangle
+    and real-world centimeter measurements.
+    """
+    try:
+        actual_width_mm = max(1.0, float(req.actual_width_cm) * 10.0)
+        actual_height_mm = max(1.0, float(req.actual_height_cm) * 10.0)
+
+        is_norm = all(v <= 1.05 for v in req.box)
+        w_px = float(req.box[2] * req.image_width) if is_norm else float(req.box[2])
+        h_px = float(req.box[3] * req.image_height) if is_norm else float(req.box[3])
+        x_px = float(req.box[0] * req.image_width) if is_norm else float(req.box[0])
+        y_px = float(req.box[1] * req.image_height) if is_norm else float(req.box[1])
+
+        w_px = max(5.0, w_px)
+        h_px = max(5.0, h_px)
+
+        mm_per_pixel_x = actual_width_mm / w_px
+        mm_per_pixel_y = actual_height_mm / h_px
+        mm_per_pixel_avg = (mm_per_pixel_x + mm_per_pixel_y) / 2.0
+
+        corners_px = [
+            [x_px, y_px],
+            [x_px + w_px, y_px],
+            [x_px + w_px, y_px + h_px],
+            [x_px, y_px + h_px]
+        ]
+        corners_mm = [
+            [0.0, 0.0],
+            [actual_width_mm, 0.0],
+            [actual_width_mm, actual_height_mm],
+            [0.0, actual_height_mm]
+        ]
+
+        try:
+            H, _ = cv2.findHomography(
+                np.array(corners_px, dtype=np.float32),
+                np.array(corners_mm, dtype=np.float32)
+            )
+            homography_matrix = H.tolist() if H is not None else [
+                [mm_per_pixel_x, 0.0, -x_px * mm_per_pixel_x],
+                [0.0, mm_per_pixel_y, -y_px * mm_per_pixel_y],
+                [0.0, 0.0, 1.0]
+            ]
+        except Exception:
+            homography_matrix = [
+                [mm_per_pixel_x, 0.0, -x_px * mm_per_pixel_x],
+                [0.0, mm_per_pixel_y, -y_px * mm_per_pixel_y],
+                [0.0, 0.0, 1.0]
+            ]
+
+        calib_obj = CameraCalibration(
+            camera_id=req.camera_id,
+            image_width=req.image_width,
+            image_height=req.image_height,
+            ref_object_width_mm=actual_width_mm,
+            ref_object_height_mm=actual_height_mm,
+            ref_corners_px=corners_px,
+            mm_per_pixel_x=mm_per_pixel_x,
+            mm_per_pixel_y=mm_per_pixel_y,
+            mm_per_pixel_avg=mm_per_pixel_avg,
+            homography_matrix=homography_matrix,
+            calibrated_at=datetime.utcnow(),
+            notes=req.notes or f"Recalibrated: {req.actual_width_cm}x{req.actual_height_cm}cm"
+        )
+
+        existing = db.query(CameraCalibration).filter(
+            CameraCalibration.camera_id == req.camera_id
+        ).first()
+
+        if existing:
+            existing.image_width = calib_obj.image_width
+            existing.image_height = calib_obj.image_height
+            existing.ref_object_width_mm = calib_obj.ref_object_width_mm
+            existing.ref_object_height_mm = calib_obj.ref_object_height_mm
+            existing.ref_corners_px = calib_obj.ref_corners_px
+            existing.mm_per_pixel_x = calib_obj.mm_per_pixel_x
+            existing.mm_per_pixel_y = calib_obj.mm_per_pixel_y
+            existing.mm_per_pixel_avg = calib_obj.mm_per_pixel_avg
+            existing.homography_matrix = calib_obj.homography_matrix
+            existing.calibrated_at = calib_obj.calibrated_at
+            existing.notes = calib_obj.notes
+            calib_saved = existing
+        else:
+            db.add(calib_obj)
+            calib_saved = calib_obj
+
+        db.commit()
+
+        # Save to filesystem
+        calib_file = BASE_DIR / "calibration" / f"calib_{req.camera_id}.json"
+        try:
+            calib_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(calib_file, "w") as f:
+                json.dump({
+                    "camera_id": req.camera_id,
+                    "image_width": req.image_width,
+                    "image_height": req.image_height,
+                    "ref_object_width_mm": actual_width_mm,
+                    "ref_object_height_mm": actual_height_mm,
+                    "ref_corners_px": corners_px,
+                    "mm_per_pixel_x": mm_per_pixel_x,
+                    "mm_per_pixel_y": mm_per_pixel_y,
+                    "mm_per_pixel_avg": mm_per_pixel_avg,
+                    "homography_matrix": homography_matrix,
+                    "calibrated_at": datetime.utcnow().isoformat(),
+                    "notes": req.notes or ""
+                }, f, indent=2)
+        except Exception:
+            pass
+
+        return to_calib_schema(calib_saved)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

@@ -222,6 +222,16 @@ export interface CalibrationRequest {
   imageHeight: number;
 }
 
+export interface DirectCalibrationRequest {
+  camera_id?: string;
+  box: [number, number, number, number];
+  actual_width_cm: number;
+  actual_height_cm: number;
+  image_width?: number;
+  image_height?: number;
+  notes?: string;
+}
+
 export interface CalibrationResponse {
   success: boolean;
   calibration: CameraCalibrationData | null;

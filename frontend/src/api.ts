@@ -1,7 +1,7 @@
 import type {
   Incident, DashboardSummary, DashboardTrends, SpecimenFixture, PlantConfig,
   RealtimeFrameResponse,
-  CameraCalibrationData, CalibrationResponse,
+  CameraCalibrationData, CalibrationResponse, DirectCalibrationRequest,
   FeedbackRequest, FeedbackResponse, MeasurementStats,
   Correction
 } from "./types";
@@ -213,6 +213,22 @@ export async function computeCalibration(
     data.calibration = normalizeCalibrationData(data.calibration);
   }
   return data;
+}
+
+export async function directRecalibrate(
+  request: DirectCalibrationRequest
+): Promise<CameraCalibrationData> {
+  const res = await fetch(`${BASE_URL}/api/measurement/calibrate/direct`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => "");
+    throw new Error(`Direct recalibration failed: ${errorText || res.statusText}`);
+  }
+  const data = await res.json();
+  return normalizeCalibrationData(data)!;
 }
 
 export async function submitFeedback(request: FeedbackRequest): Promise<FeedbackResponse> {

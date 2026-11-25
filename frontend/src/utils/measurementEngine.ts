@@ -223,6 +223,20 @@ function distance(a: number[], b: number[]): number {
   return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2);
 }
 
+export function mmToCm(mm: number): number {
+  if (!Number.isFinite(mm) || isNaN(mm)) return 0;
+  return Math.round((mm / 10.0) * 10) / 10;
+}
+
+export function cmToMm(cm: number): number {
+  if (!Number.isFinite(cm) || isNaN(cm)) return 0;
+  return Math.round(cm * 10.0 * 10) / 10;
+}
+
+export function formatCm(mm: number): string {
+  return formatMeasurement(mm, "cm");
+}
+
 /**
  * Format measurement for display
  */

@@ -19,6 +19,11 @@ interface MeasurementWebcamFeedProps {
   onFrameResponse: (response: RealtimeFrameResponse) => void;
   compact?: boolean;
   showControls?: boolean;
+  isAdjustingBox?: boolean;
+  setIsAdjustingBox?: (v: boolean) => void;
+  customBox?: [number, number, number, number] | null;
+  setCustomBox?: (box: [number, number, number, number] | null) => void;
+  calibMmPerPx?: number;
 }
 
 export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
@@ -37,6 +42,11 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
   onFrameResponse,
   compact = false,
   showControls = true,
+  isAdjustingBox = false,
+  setIsAdjustingBox,
+  customBox = null,
+  setCustomBox,
+  calibMmPerPx = 0.8,
 }) => {
   const [liveFps, setLiveFps] = useState(0);
   const [detectionCount, setDetectionCount] = useState(0);
@@ -44,14 +54,21 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
   const [liveSeverity, setLiveSeverity] = useState("CLEAR_BELT");
   const [showCalibrationDrawer, setShowCalibrationDrawer] = useState(false);
 
+  // Manual box drawing state
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [startPoint, setStartPoint] = useState<{ x: number; y: number } | null>(null);
+  const [dragBox, setDragBox] = useState<[number, number, number, number] | null>(null);
+
   const isSendingRef = useRef(false);
   const intervalRef = useRef<any>(null);
+  const lastDetectionsRef = useRef<RealtimeDetectionBox[]>([]);
 
   // Render overlay on canvas
   const renderOverlay = useCallback((
     detections: RealtimeDetectionBox[],
     limitMm: number,
-    fps: number
+    fps: number,
+    activeBox: [number, number, number, number] | null = null
   ) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -103,68 +120,193 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
     ctx.strokeRect(tx, ty, targetW, targetH);
     ctx.setLineDash([]);
 
-    // Render detections
-    detections.forEach((d) => {
-      const [bx, by, bw, bh] = d.bbox;
+    // If not adjusting box, render system detections
+    if (!isAdjustingBox) {
+      detections.forEach((d) => {
+        const [bx, by, bw, bh] = d.bbox;
+        const x = bx * w;
+        const y = by * h;
+        const boxW = bw * w;
+        const boxH = bh * h;
+
+        const isOver = d.major_axis_mm >= limitMm || d.is_oversize;
+        const isWarn = d.major_axis_mm >= limitMm * 0.8 || d.is_warning;
+
+        const color = isOver ? "#ef4444" : isWarn ? "#f59e0b" : "#10b981";
+
+        // Bounding box
+        ctx.strokeStyle = color;
+        ctx.lineWidth = isOver ? 3 : 2;
+        ctx.strokeRect(x, y, boxW, boxH);
+
+        // Corner brackets
+        const bracket = Math.min(12, boxW / 4, boxH / 4);
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(x, y + bracket); ctx.lineTo(x, y); ctx.lineTo(x + bracket, y);
+        ctx.moveTo(x + boxW - bracket, y); ctx.lineTo(x + boxW, y); ctx.lineTo(x + boxW, y + bracket);
+        ctx.moveTo(x, y + boxH - bracket); ctx.lineTo(x, y + boxH); ctx.lineTo(x + bracket, y + boxH);
+        ctx.moveTo(x + boxW - bracket, y + boxH); ctx.lineTo(x + boxW, y + boxH); ctx.lineTo(x + boxW, y + boxH - bracket);
+        ctx.stroke();
+
+        // Measurement label in Centimeters (cm)
+        const majorCm = (d.major_axis_mm / 10).toFixed(1);
+        const minorCm = (d.minor_axis_mm / 10).toFixed(1);
+        const label = isOver
+          ? `OBJECT #${d.rock_index}: ${majorCm} cm (${Math.round(d.major_axis_mm)} mm) [OVERSIZE]`
+          : isWarn
+          ? `OBJECT #${d.rock_index}: ${majorCm} cm (${Math.round(d.major_axis_mm)} mm) [NEAR LIMIT]`
+          : `OBJECT #${d.rock_index}: ${majorCm} cm (${Math.round(d.major_axis_mm)} mm)`;
+
+        ctx.font = "bold 12px monospace";
+        const tagW = Math.max(ctx.measureText(label).width + 16, 210);
+        const tagH = 30;
+        const tagY = Math.max(tagH + 4, y - 4);
+
+        ctx.fillStyle = "rgba(9, 14, 18, 0.92)";
+        ctx.fillRect(x, tagY - tagH, tagW, tagH);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x, tagY - tagH, tagW, tagH);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(label, x + 6, tagY - 12);
+
+        ctx.font = "10px monospace";
+        ctx.fillStyle = color;
+        ctx.fillText(
+          `W: ${majorCm} cm | H: ${minorCm} cm | ${d.model_name.includes("YOLO") ? "YOLOv8" : "Salient Object"}`,
+          x + 6,
+          tagY + 4
+        );
+      });
+    }
+
+    // Render User-Adjusted / Drawn Box if active or adjusting
+    const boxToDraw = activeBox || dragBox || customBox;
+    if (isAdjustingBox && boxToDraw) {
+      const [bx, by, bw, bh] = boxToDraw;
       const x = bx * w;
       const y = by * h;
       const boxW = bw * w;
       const boxH = bh * h;
 
-      const isOver = d.major_axis_mm >= limitMm || d.is_oversize;
-      const isWarn = d.major_axis_mm >= limitMm * 0.8 || d.is_warning;
+      // Semi-transparent backdrop highlight
+      ctx.fillStyle = "rgba(6, 182, 212, 0.12)";
+      ctx.fillRect(x, y, boxW, boxH);
 
-      const color = isOver ? "#ef4444" : isWarn ? "#f59e0b" : "#10b981";
-
-      // Bounding box
-      ctx.strokeStyle = color;
-      ctx.lineWidth = isOver ? 3 : 2;
+      // Neon Cyan Dashed Boundary
+      ctx.strokeStyle = "#06b6d4";
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 4]);
       ctx.strokeRect(x, y, boxW, boxH);
+      ctx.setLineDash([]);
 
-      // Corner brackets
-      const bracket = Math.min(12, boxW / 4, boxH / 4);
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(x, y + bracket); ctx.lineTo(x, y); ctx.lineTo(x + bracket, y);
-      ctx.moveTo(x + boxW - bracket, y); ctx.lineTo(x + boxW, y); ctx.lineTo(x + boxW, y + bracket);
-      ctx.moveTo(x, y + boxH - bracket); ctx.lineTo(x, y + boxH); ctx.lineTo(x + bracket, y + boxH);
-      ctx.moveTo(x + boxW - bracket, y + boxH); ctx.lineTo(x + boxW, y + boxH); ctx.lineTo(x + boxW, y + boxH - bracket);
-      ctx.stroke();
+      // 4 Corner Handles
+      const handleSize = 8;
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = "#06b6d4";
+      ctx.lineWidth = 2;
+      [
+        [x, y],
+        [x + boxW, y],
+        [x, y + boxH],
+        [x + boxW, y + boxH],
+        [x + boxW / 2, y],
+        [x + boxW / 2, y + boxH],
+        [x, y + boxH / 2],
+        [x + boxW, y + boxH / 2],
+      ].forEach(([hx, hy]) => {
+        ctx.fillRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
+        ctx.strokeRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
+      });
 
-      // Measurement label
-      const label = isOver
-        ? `OBJECT #${d.rock_index}: ${Math.round(d.major_axis_mm)}mm [OVERSIZE]`
-        : isWarn
-        ? `OBJECT #${d.rock_index}: ${Math.round(d.major_axis_mm)}mm [NEAR LIMIT]`
-        : `OBJECT #${d.rock_index}: ${Math.round(d.major_axis_mm)}mm`;
+      // Calculate approximate cm for drawn box
+      const effectiveScale = calibMmPerPx > 0 ? calibMmPerPx : 0.8;
+      const estWidthCm = ((boxW * effectiveScale) / 10).toFixed(1);
+      const estHeightCm = ((boxH * effectiveScale) / 10).toFixed(1);
 
-      ctx.font = "bold 11px monospace";
-      const tagW = Math.max(ctx.measureText(label).width + 12, 180);
+      // Dimension Tag
+      const userTag = `Selected Object Box: ~${estWidthCm} cm × ~${estHeightCm} cm`;
+      ctx.font = "bold 12px monospace";
+      const tagW = ctx.measureText(userTag).width + 16;
       const tagH = 28;
-      const tagY = Math.max(tagH + 4, y - 4);
+      const tagY = Math.max(tagH + 6, y - 6);
 
-      ctx.fillStyle = "rgba(9, 14, 18, 0.9)";
+      ctx.fillStyle = "rgba(8, 28, 36, 0.95)";
       ctx.fillRect(x, tagY - tagH, tagW, tagH);
-      ctx.strokeStyle = color;
+      ctx.strokeStyle = "#06b6d4";
       ctx.lineWidth = 1.5;
       ctx.strokeRect(x, tagY - tagH, tagW, tagH);
 
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(label, x + 6, tagY - 10);
+      ctx.fillStyle = "#38bdf8";
+      ctx.fillText(userTag, x + 8, tagY - 8);
+    }
+  }, [isAdjustingBox, dragBox, customBox, calibMmPerPx]);
 
-      ctx.font = "9px monospace";
-      ctx.fillStyle = color;
-      ctx.fillText(
-        `W:${Math.round(d.major_axis_mm)}mm H:${Math.round(d.minor_axis_mm)}mm | ${d.model_name.includes("YOLO") ? "YOLOv8" : "CV"}`,
-        x + 6,
-        tagY + 6
-      );
-    });
-  }, []);
+  // Keep last detections in ref
+  useEffect(() => {
+    if (canvasRef.current && isAdjustingBox) {
+      renderOverlay(lastDetectionsRef.current, throatLimitMm, liveFps, customBox);
+    }
+  }, [isAdjustingBox, customBox, renderOverlay, throatLimitMm, liveFps]);
+
+  // Pointer event helpers for interactive box drawing
+  const getNormalizedPoint = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    const container = e.currentTarget.getBoundingClientRect();
+    let clientX = 0;
+    let clientY = 0;
+    if ("touches" in e) {
+      if (e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+      } else if (e.changedTouches.length > 0) {
+        clientX = e.changedTouches[0].clientX;
+        clientY = e.changedTouches[0].clientY;
+      }
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    const x = Math.max(0, Math.min(1, (clientX - container.left) / container.width));
+    const y = Math.max(0, Math.min(1, (clientY - container.top) / container.height));
+    return { x, y };
+  };
+
+  const handlePointerDown = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    if (!isAdjustingBox) return;
+    const pt = getNormalizedPoint(e);
+    setIsDrawing(true);
+    setStartPoint(pt);
+    const initBox: [number, number, number, number] = [pt.x, pt.y, 0.01, 0.01];
+    setDragBox(initBox);
+    renderOverlay(lastDetectionsRef.current, throatLimitMm, liveFps, initBox);
+  };
+
+  const handlePointerMove = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    if (!isAdjustingBox || !isDrawing || !startPoint) return;
+    const pt = getNormalizedPoint(e);
+    const minX = Math.min(startPoint.x, pt.x);
+    const minY = Math.min(startPoint.y, pt.y);
+    const w = Math.max(0.01, Math.abs(pt.x - startPoint.x));
+    const h = Math.max(0.01, Math.abs(pt.y - startPoint.y));
+    const newBox: [number, number, number, number] = [minX, minY, w, h];
+    setDragBox(newBox);
+    renderOverlay(lastDetectionsRef.current, throatLimitMm, liveFps, newBox);
+  };
+
+  const handlePointerUp = () => {
+    if (!isAdjustingBox || !isDrawing || !dragBox) return;
+    setIsDrawing(false);
+    setStartPoint(null);
+    if (setCustomBox && dragBox[2] > 0.02 && dragBox[3] > 0.02) {
+      setCustomBox(dragBox);
+    }
+  };
 
   // Process frame
   const processFrame = useCallback(async () => {
-    if (!videoRef.current || !isCameraActive || !isProcessingLoop || isSendingRef.current) {
+    if (!videoRef.current || !isCameraActive || !isProcessingLoop || isSendingRef.current || isAdjustingBox) {
       return;
     }
 
@@ -200,7 +342,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
           const resp: RealtimeFrameResponse = await sendRealtimeFrame(blob, {
             calibrationScale,
             throatLimitMm,
-            autoCreateIncident: false, // Don't create incidents in measurement mode
+            autoCreateIncident: false,
             sourceId: "CAM-WEBCAM-MEASURE",
           });
 
@@ -208,6 +350,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
           setDetectionCount(resp.detection_count);
           setMaxCaliberMm(resp.max_caliber_mm);
           setLiveSeverity(resp.severity);
+          lastDetectionsRef.current = resp.detections || [];
 
           // Render overlay
           renderOverlay(resp.detections, throatLimitMm, resp.fps);
@@ -223,15 +366,11 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
     } catch {
       isSendingRef.current = false;
     }
-  }, [isCameraActive, isProcessingLoop, calibrationScale, throatLimitMm, renderOverlay, onFrameResponse]);
+  }, [isCameraActive, isProcessingLoop, isAdjustingBox, calibrationScale, throatLimitMm, renderOverlay, onFrameResponse]);
 
   // Main loop
   useEffect(() => {
-    if (!isCameraActive || !isProcessingLoop) {
-      if (canvasRef.current) {
-        const ctx = canvasRef.current.getContext("2d");
-        if (ctx) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-      }
+    if (!isCameraActive || !isProcessingLoop || isAdjustingBox) {
       if (intervalRef.current) clearInterval(intervalRef.current);
       return;
     }
@@ -243,7 +382,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isCameraActive, isProcessingLoop, processFrame]);
+  }, [isCameraActive, isProcessingLoop, isAdjustingBox, processFrame]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -254,12 +393,43 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
 
   return (
     <div className={`space-y-4 ${compact ? "compact-feed" : ""}`}>
+      {/* Box Adjustment Guidance Banner */}
+      {isAdjustingBox && (
+        <div className="p-3 bg-cyan-950/70 border-2 border-cyan-500 rounded-xl flex items-center justify-between text-cyan-200 text-xs shadow-lg animate-pulse">
+          <div className="flex items-center gap-2">
+            <span className="text-base">✏️</span>
+            <div>
+              <span className="font-bold text-white uppercase tracking-wider block">Manual Box Selection Active</span>
+              <span>Click and drag over the camera image to outline the object. Release when aligned.</span>
+            </div>
+          </div>
+          {setIsAdjustingBox && (
+            <button
+              onClick={() => setIsAdjustingBox(false)}
+              className="px-3 py-1 bg-cyan-700 hover:bg-cyan-600 text-white font-bold rounded-lg cursor-pointer text-xs transition-colors shrink-0"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Video Viewfinder Container */}
-      <div className={`relative rounded-2xl overflow-hidden aspect-video shadow-2xl transition-all duration-300 border-2 ${
-        isCameraActive
-          ? "border-emerald-700/60 bg-black opacity-100"
-          : "border-slate-800 bg-[#050c0b]"
-      }`}>
+      <div
+        onMouseDown={handlePointerDown}
+        onMouseMove={handlePointerMove}
+        onMouseUp={handlePointerUp}
+        onTouchStart={handlePointerDown}
+        onTouchMove={handlePointerMove}
+        onTouchEnd={handlePointerUp}
+        className={`relative rounded-2xl overflow-hidden aspect-video shadow-2xl transition-all duration-300 border-2 ${
+          isAdjustingBox
+            ? "border-cyan-400 ring-4 ring-cyan-500/30 cursor-crosshair select-none bg-black"
+            : isCameraActive
+            ? "border-emerald-700/60 bg-black opacity-100"
+            : "border-slate-800 bg-[#050c0b]"
+        }`}
+      >
         <video
           ref={videoRef}
           autoPlay
@@ -271,7 +441,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
         {/* Canvas Overlay */}
         <canvas
           ref={canvasRef}
-          className={`absolute inset-0 w-full h-full pointer-events-none ${isCameraActive ? "block" : "hidden"}`}
+          className={`absolute inset-0 w-full h-full ${isAdjustingBox ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"} ${isCameraActive ? "block" : "hidden"}`}
         />
 
         {/* Inactive overlay */}
@@ -332,13 +502,13 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
               <div>
                 <span className="text-slate-400">MAX SIZE: </span>
                 <span className={`font-bold ${maxCaliberMm >= throatLimitMm ? "text-rose-400 animate-pulse" : maxCaliberMm >= throatLimitMm * 0.8 ? "text-amber-400" : "text-emerald-400"}`}>
-                  {Math.round(maxCaliberMm)}mm
+                  {(maxCaliberMm / 10).toFixed(1)} cm <span className="text-[10px] text-slate-400 font-normal">({Math.round(maxCaliberMm)} mm)</span>
                 </span>
               </div>
               <span className="text-slate-600">|</span>
               <div>
                 <span className="text-slate-400">LIMIT: </span>
-                <span className="text-white font-bold">{throatLimitMm}mm</span>
+                <span className="text-white font-bold">{(throatLimitMm / 10).toFixed(1)} cm</span>
               </div>
               <span className="text-slate-600">|</span>
               <div>
@@ -356,7 +526,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
                 {liveSeverity.replace("_", " ")}
               </span>
               <span className="text-slate-600">|</span>
-              <span>YOLOv8</span>
+              <span>YOLOv8 + Salient</span>
             </div>
           </div>
         </div>

@@ -3,7 +3,7 @@ import { Zap, Target, Settings, AlertTriangle, CheckCircle2, Camera, Upload, Lay
 import { MeasurementWebcamFeed } from "../components/MeasurementWebcamFeed";
 import { CalibrationWizard } from "../components/CalibrationWizard";
 import { MeasurementPanel } from "../components/MeasurementPanel";
-import { fetchCalibration, sendRealtimeFrame } from "../api";
+import { fetchCalibration, sendRealtimeFrame, directRecalibrate } from "../api";
 import { createMeasurement, type MeasurementConfig } from "../utils/measurementEngine";
 import { clearAllData } from "../utils/feedbackSystem";
 import type { RealtimeFrameResponse, RealtimeDetectionBox, CameraCalibrationData, Measurement } from "../types";
@@ -65,11 +65,50 @@ export const MeasurementView: React.FC = () => {
   const [currentMeasurement, setCurrentMeasurement] = useState<Measurement | null>(null);
   const [currentDetection, setCurrentDetection] = useState<RealtimeDetectionBox | null>(null);
 
+  // Manual box adjustment & continuous recalibration state
+  const [isAdjustingBox, setIsAdjustingBox] = useState(false);
+  const [customBox, setCustomBox] = useState<[number, number, number, number] | null>(null);
+  const [recalibrationCount, setRecalibrationCount] = useState(0);
+
   // Live feed props
   const [calibrationScale, setCalibrationScale] = useState(1.2);
   const [throatLimitMm, setThroatLimitMm] = useState(800);
   const [warningThresholdMm] = useState(640); // 80% of throat limit
   const [isProcessingLoop, setIsProcessingLoop] = useState(false);
+
+  // Specimen drawing state
+  const [isSpecimenDrawing, setIsSpecimenDrawing] = useState(false);
+  const [specimenStartPt, setSpecimenStartPt] = useState<{ x: number; y: number } | null>(null);
+
+  const getSpecimenNormalizedPoint = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    return { x, y };
+  };
+
+  const handleSpecimenMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isAdjustingBox) return;
+    const pt = getSpecimenNormalizedPoint(e);
+    setIsSpecimenDrawing(true);
+    setSpecimenStartPt(pt);
+    setCustomBox([pt.x, pt.y, 0.01, 0.01]);
+  };
+
+  const handleSpecimenMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isAdjustingBox || !isSpecimenDrawing || !specimenStartPt) return;
+    const pt = getSpecimenNormalizedPoint(e);
+    const minX = Math.min(specimenStartPt.x, pt.x);
+    const minY = Math.min(specimenStartPt.y, pt.y);
+    const w = Math.max(0.01, Math.abs(pt.x - specimenStartPt.x));
+    const h = Math.max(0.01, Math.abs(pt.y - specimenStartPt.y));
+    setCustomBox([minX, minY, w, h]);
+  };
+
+  const handleSpecimenMouseUp = () => {
+    setIsSpecimenDrawing(false);
+    setSpecimenStartPt(null);
+  };
 
   // Specimen mode state
   const [selectedSpecimenId, setSelectedSpecimenId] = useState<string>("specimen_critical_boulder");
@@ -95,6 +134,27 @@ export const MeasurementView: React.FC = () => {
     setCalibration(newCalibration);
     setShowCalibrationWizard(false);
   }, []);
+
+  // Handle direct continuous recalibration from user-drawn box and cm dimensions
+  const handleDirectRecalibrate = useCallback(async (actualWidthCm: number, actualHeightCm: number) => {
+    const box = customBox || (currentDetection ? currentDetection.bbox : [0.25, 0.25, 0.5, 0.5]);
+    const imgW = videoRef.current?.videoWidth || 1280;
+    const imgH = videoRef.current?.videoHeight || 720;
+
+    const updatedCalib = await directRecalibrate({
+      camera_id: cameraId,
+      box: box as [number, number, number, number],
+      actual_width_cm: actualWidthCm,
+      actual_height_cm: actualHeightCm,
+      image_width: imgW,
+      image_height: imgH,
+      notes: `User iteration #${recalibrationCount + 1}: ${actualWidthCm}x${actualHeightCm}cm`,
+    });
+
+    setCalibration(updatedCalib);
+    setRecalibrationCount((prev) => prev + 1);
+    return updatedCalib;
+  }, [customBox, currentDetection, cameraId, recalibrationCount]);
 
   // Handle correction submit
   const handleCorrectionSubmit = useCallback(() => {
@@ -303,8 +363,13 @@ export const MeasurementView: React.FC = () => {
               <div className="flex items-center gap-2 text-sm">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 <span className="text-emerald-400 font-mono font-semibold">
-                  Calibrated: {Number(calibMmPerPx).toFixed(4)} mm/px
+                  Scale: {(Number(calibMmPerPx) / 10).toFixed(4)} cm/px ({Number(calibMmPerPx).toFixed(3)} mm/px)
                 </span>
+                {recalibrationCount > 0 && (
+                  <span className="text-[10px] bg-cyan-900/60 border border-cyan-700 text-cyan-300 px-2 py-0.5 rounded font-mono">
+                    Iter #{recalibrationCount}
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -372,6 +437,11 @@ export const MeasurementView: React.FC = () => {
                 onFrameResponse={(res) => handleFrameResponse(res)}
                 compact={true}
                 showControls={true}
+                isAdjustingBox={isAdjustingBox}
+                setIsAdjustingBox={setIsAdjustingBox}
+                customBox={customBox}
+                setCustomBox={setCustomBox}
+                calibMmPerPx={Number(calibMmPerPx)}
               />
 
               {/* Measurement Target Guide */}
@@ -431,11 +501,37 @@ export const MeasurementView: React.FC = () => {
               </div>
 
               {/* Specimen Viewfinder Canvas */}
-              <div className="relative rounded-2xl overflow-hidden aspect-video bg-black border-2 border-emerald-700/60 shadow-2xl flex items-center justify-center">
+              <div
+                onMouseDown={handleSpecimenMouseDown}
+                onMouseMove={handleSpecimenMouseMove}
+                onMouseUp={handleSpecimenMouseUp}
+                className={`relative rounded-2xl overflow-hidden aspect-video bg-black border-2 shadow-2xl flex items-center justify-center transition-all ${
+                  isAdjustingBox
+                    ? "border-cyan-400 ring-4 ring-cyan-500/30 cursor-crosshair select-none"
+                    : "border-emerald-700/60"
+                }`}
+              >
                 <canvas
                   ref={specimenCanvasRef}
                   className="w-full h-full object-contain"
                 />
+
+                {/* Drawn Custom Box Overlay on Specimen */}
+                {isAdjustingBox && customBox && (
+                  <div
+                    className="absolute border-2 border-dashed border-cyan-400 bg-cyan-400/10 pointer-events-none"
+                    style={{
+                      left: `${customBox[0] * 100}%`,
+                      top: `${customBox[1] * 100}%`,
+                      width: `${customBox[2] * 100}%`,
+                      height: `${customBox[3] * 100}%`,
+                    }}
+                  >
+                    <div className="absolute -top-7 left-0 bg-slate-900/90 border border-cyan-400 text-cyan-300 text-[10px] font-mono px-2 py-0.5 rounded shadow whitespace-nowrap">
+                      Selected: ~{((customBox[2] * 1280 * (calibMmPerPx || 0.8)) / 10).toFixed(1)} cm × ~{((customBox[3] * 720 * (calibMmPerPx || 0.8)) / 10).toFixed(1)} cm
+                    </div>
+                  </div>
+                )}
 
                 {isSpecimenProcessing && (
                   <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center">
@@ -473,6 +569,12 @@ export const MeasurementView: React.FC = () => {
             onCorrectionSubmit={handleCorrectionSubmit}
             onCalibrationClick={() => setShowCalibrationWizard(true)}
             onClearClick={handleClearAllData}
+            isAdjustingBox={isAdjustingBox}
+            setIsAdjustingBox={setIsAdjustingBox}
+            customBox={customBox}
+            onDirectRecalibrate={handleDirectRecalibrate}
+            recalibrationCount={recalibrationCount}
+            calibMmPerPx={Number(calibMmPerPx)}
           />
         </div>
       </div>
