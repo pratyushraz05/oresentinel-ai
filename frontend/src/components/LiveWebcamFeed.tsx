@@ -233,10 +233,11 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
       ctx.fillText(label, x + 8, tagY - 18);
 
       // Sub text
+      const areaCm2 = ((d.major_axis_mm * d.minor_axis_mm) / 100).toFixed(1);
       ctx.font = "10px monospace";
       ctx.fillStyle = color;
       ctx.fillText(
-        `W:${majorCm}cm H:${minorCm}cm | Mass: ~${Math.round(d.estimated_mass_kg)}kg | ${systemCalib?.is_calibrated ? 'System Calibrated' : 'Est. Scale'}`,
+        `L:${majorCm}cm B:${minorCm}cm | Area: ${areaCm2}cm² | Mass: ~${Math.round(d.estimated_mass_kg)}kg | ${systemCalib?.is_calibrated ? 'System Calibrated' : 'Est. Scale'}`,
         x + 8,
         tagY - 6
       );

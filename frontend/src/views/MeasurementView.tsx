@@ -61,6 +61,8 @@ export const MeasurementView: React.FC<MeasurementViewProps> = ({ onCalibrationU
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [objectDistanceCm, setObjectDistanceCm] = useState<number>(50.0);
   const [hasConfirmedDistance, setHasConfirmedDistance] = useState<boolean>(false);
+  const [refBlockLengthCm, setRefBlockLengthCm] = useState<number>(25.0);
+  const [refBlockBreadthCm, setRefBlockBreadthCm] = useState<number>(18.0);
 
   // Calibration state
   const [calibration, setCalibration] = useState<CameraCalibrationData | null>(null);
@@ -464,6 +466,10 @@ export const MeasurementView: React.FC<MeasurementViewProps> = ({ onCalibrationU
                 setObjectDistanceCm={setObjectDistanceCm}
                 hasConfirmedDistance={hasConfirmedDistance}
                 setHasConfirmedDistance={setHasConfirmedDistance}
+                refBlockLengthCm={refBlockLengthCm}
+                setRefBlockLengthCm={setRefBlockLengthCm}
+                refBlockBreadthCm={refBlockBreadthCm}
+                setRefBlockBreadthCm={setRefBlockBreadthCm}
               />
 
               {/* Measurement Target Guide */}
@@ -550,7 +556,7 @@ export const MeasurementView: React.FC<MeasurementViewProps> = ({ onCalibrationU
                     }}
                   >
                     <div className="absolute -top-7 left-0 bg-slate-900/90 border border-cyan-400 text-cyan-300 text-[10px] font-mono px-2 py-0.5 rounded shadow whitespace-nowrap">
-                      Selected: ~{((customBox[2] * 1280 * (calibMmPerPx || 0.8)) / 10).toFixed(1)} cm × ~{((customBox[3] * 720 * (calibMmPerPx || 0.8)) / 10).toFixed(1)} cm
+                      Selected: ~{((Math.max(customBox[2] * 1280, customBox[3] * 720) * (calibMmPerPx || 0.8)) / 10).toFixed(1)} cm (L) × ~{((Math.min(customBox[2] * 1280, customBox[3] * 720) * (calibMmPerPx || 0.8)) / 10).toFixed(1)} cm (B) | Area: ~{(((customBox[2] * 1280 * (calibMmPerPx || 0.8)) / 10) * ((customBox[3] * 720 * (calibMmPerPx || 0.8)) / 10)).toFixed(1)} cm²
                     </div>
                   </div>
                 )}

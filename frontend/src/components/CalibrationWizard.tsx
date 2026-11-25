@@ -338,26 +338,35 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
               </div>
 
               {isCustom && (
-                <div className="grid grid-cols-2 gap-3 p-4 bg-slate-900/50 rounded-xl border border-slate-700">
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">Width (mm)</label>
-                    <input
-                      type="number"
-                      value={customWidth}
-                      onChange={(e) => setCustomWidth(e.target.value)}
-                      placeholder="e.g., 85.6"
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:border-emerald-400 focus:outline-none"
-                    />
+                <div className="space-y-3 p-4 bg-slate-900/50 rounded-xl border border-slate-700">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">Length (mm)</label>
+                      <input
+                        type="number"
+                        value={customWidth}
+                        onChange={(e) => setCustomWidth(e.target.value)}
+                        placeholder="e.g., 85.6"
+                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:border-emerald-400 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">Breadth (mm)</label>
+                      <input
+                        type="number"
+                        value={customHeight}
+                        onChange={(e) => setCustomHeight(e.target.value)}
+                        placeholder="e.g., 53.98"
+                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:border-emerald-400 focus:outline-none"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">Height (mm)</label>
-                    <input
-                      type="number"
-                      value={customHeight}
-                      onChange={(e) => setCustomHeight(e.target.value)}
-                      placeholder="e.g., 53.98"
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:border-emerald-400 focus:outline-none"
-                    />
+                  {/* Surface Area readout */}
+                  <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg text-xs font-mono flex items-center justify-between text-slate-300">
+                    <span>Reference Block Surface Area:</span>
+                    <span className="text-emerald-400 font-bold text-sm">
+                      {((parseFloat(customWidth) || 0) * (parseFloat(customHeight) || 0) / 100).toFixed(1)} <span className="text-xs font-normal text-emerald-500">cm²</span>
+                    </span>
                   </div>
                 </div>
               )}

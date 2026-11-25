@@ -270,28 +270,44 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
         {/* Primary Centimeter (cm) Readout */}
         <div className="grid grid-cols-2 gap-3">
           <div className="p-3 bg-slate-900/60 rounded-xl border border-emerald-900/60 shadow-inner">
-            <div className="text-xs font-mono uppercase text-slate-400">Width</div>
+            <div className="text-xs font-mono uppercase text-slate-400">Length</div>
             <div className="text-2xl font-black font-mono text-emerald-300">
-              {(measurement.predictedWidthMm / 10).toFixed(1)} <span className="text-sm font-normal text-emerald-500">cm</span>
+              {(Math.max(measurement.predictedWidthMm, measurement.predictedHeightMm) / 10).toFixed(1)} <span className="text-sm font-normal text-emerald-500">cm</span>
             </div>
             <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-              {Math.round(measurement.predictedWidthMm)} mm <span className="text-[10px] text-slate-600">± {Math.round((measurement.detection.bbox[2] || 0.1) * 640 * 0.1)}px</span>
+              {Math.round(Math.max(measurement.predictedWidthMm, measurement.predictedHeightMm))} mm <span className="text-[10px] text-slate-600">± {Math.round((measurement.detection.bbox[2] || 0.1) * 640 * 0.1)}px</span>
             </div>
           </div>
           <div className="p-3 bg-slate-900/60 rounded-xl border border-emerald-900/60 shadow-inner">
-            <div className="text-xs font-mono uppercase text-slate-400">Height</div>
+            <div className="text-xs font-mono uppercase text-slate-400">Breadth</div>
             <div className="text-2xl font-black font-mono text-emerald-300">
-              {(measurement.predictedHeightMm / 10).toFixed(1)} <span className="text-sm font-normal text-emerald-500">cm</span>
+              {(Math.min(measurement.predictedWidthMm, measurement.predictedHeightMm) / 10).toFixed(1)} <span className="text-sm font-normal text-emerald-500">cm</span>
             </div>
             <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-              {Math.round(measurement.predictedHeightMm)} mm <span className="text-[10px] text-slate-600">± {Math.round((measurement.detection.bbox[3] || 0.1) * 480 * 0.1)}px</span>
+              {Math.round(Math.min(measurement.predictedWidthMm, measurement.predictedHeightMm))} mm <span className="text-[10px] text-slate-600">± {Math.round((measurement.detection.bbox[3] || 0.1) * 480 * 0.1)}px</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Surface Area Display */}
+        <div className="p-3 bg-slate-900/50 rounded-xl border border-teal-800/60 flex items-center justify-between">
+          <div>
+            <div className="text-xs font-mono uppercase text-teal-400 font-semibold">Surface Area</div>
+            <div className="text-[11px] text-slate-400 font-mono mt-0.5">Length × Breadth projection</div>
+          </div>
+          <div className="text-right">
+            <div className="text-xl font-bold font-mono text-teal-300">
+              {((measurement.predictedWidthMm * measurement.predictedHeightMm) / 100).toFixed(1)} <span className="text-xs font-normal text-teal-500">cm²</span>
+            </div>
+            <div className="text-[10px] text-slate-400 font-mono">
+              {((measurement.predictedWidthMm * measurement.predictedHeightMm) / 1000000).toFixed(4)} m²
             </div>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 pt-1">
           <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-800">
-            <div className="text-[11px] text-slate-400">Major Caliber</div>
+            <div className="text-[11px] text-slate-400">Major Caliber (Length)</div>
             <div className="text-lg font-bold font-mono text-white">
               {(Math.max(measurement.predictedWidthMm, measurement.predictedHeightMm) / 10).toFixed(1)} cm
               <span className="text-[10px] text-slate-500 block font-normal font-sans">
@@ -300,7 +316,7 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
             </div>
           </div>
           <div className="p-2.5 bg-slate-900/40 rounded-lg border border-slate-800">
-            <div className="text-[11px] text-slate-400">Minor Caliber</div>
+            <div className="text-[11px] text-slate-400">Minor Caliber (Breadth)</div>
             <div className="text-lg font-bold font-mono text-white">
               {(Math.min(measurement.predictedWidthMm, measurement.predictedHeightMm) / 10).toFixed(1)} cm
               <span className="text-[10px] text-slate-500 block font-normal font-sans">
@@ -333,10 +349,16 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
 
         <div className="text-xs text-slate-200">
           According to the system, the measurement is:
-          <div className="mt-1 text-base font-bold text-white font-mono bg-black/50 px-3 py-2 rounded-lg border border-emerald-900 flex items-center justify-between">
-            <span>Width: <strong className="text-emerald-400">{(measurement.predictedWidthMm / 10).toFixed(1)} cm</strong></span>
-            <span className="text-slate-500">×</span>
-            <span>Height: <strong className="text-emerald-400">{(measurement.predictedHeightMm / 10).toFixed(1)} cm</strong></span>
+          <div className="mt-1 text-base font-bold text-white font-mono bg-black/50 px-3 py-2.5 rounded-lg border border-emerald-900 flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <span>Length: <strong className="text-emerald-400">{(Math.max(measurement.predictedWidthMm, measurement.predictedHeightMm) / 10).toFixed(1)} cm</strong></span>
+              <span className="text-slate-500">×</span>
+              <span>Breadth: <strong className="text-emerald-400">{(Math.min(measurement.predictedWidthMm, measurement.predictedHeightMm) / 10).toFixed(1)} cm</strong></span>
+            </div>
+            <div className="pt-1.5 border-t border-emerald-950 flex items-center justify-between text-xs text-teal-300">
+              <span>Surface Area:</span>
+              <strong className="text-teal-400 font-bold">{((measurement.predictedWidthMm * measurement.predictedHeightMm) / 100).toFixed(1)} cm²</strong>
+            </div>
           </div>
         </div>
 
@@ -419,7 +441,7 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
           <div className="grid grid-cols-3 gap-2">
             <div>
               <label className="text-[11px] font-medium text-slate-300 block mb-1">
-                Actual Width
+                Actual Length
               </label>
               <div className="relative">
                 <input
@@ -437,7 +459,7 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
 
             <div>
               <label className="text-[11px] font-medium text-slate-300 block mb-1">
-                Actual Height
+                Actual Breadth
               </label>
               <div className="relative">
                 <input
@@ -470,6 +492,14 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
                 <span className="absolute right-2 top-1.5 text-[10px] font-mono text-cyan-500">cm</span>
               </div>
             </div>
+          </div>
+
+          {/* Live Calculated Area at Bottom */}
+          <div className="p-2.5 bg-slate-900/90 border border-cyan-800/80 rounded-lg text-xs font-mono flex items-center justify-between text-cyan-200">
+            <span>Calculated Block Surface Area:</span>
+            <span className="text-cyan-400 font-bold">
+              {((parseFloat(actualWidthCmInput) || 0) * (parseFloat(actualHeightCmInput) || 0)).toFixed(1)} cm²
+            </span>
           </div>
 
           {/* Custom Drawn Box Coordinates Info */}
@@ -566,7 +596,7 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">Actual Width</label>
+                  <label className="text-xs text-slate-400 block mb-1">Actual Length</label>
                   <div className="flex gap-2">
                     <input
                       type="number"
@@ -574,7 +604,7 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
                       min="0.1"
                       value={correctionWidth}
                       onChange={(e) => setCorrectionWidth(e.target.value)}
-                      placeholder="e.g., 245"
+                      placeholder="e.g., 25"
                       className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:border-emerald-400 focus:outline-none"
                     />
                     <select
@@ -582,25 +612,34 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
                       onChange={(e) => setCorrectionUnit(e.target.value as "mm" | "cm" | "m")}
                       className="px-2 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:border-emerald-400 focus:outline-none"
                     >
-                      <option value="mm">mm</option>
                       <option value="cm">cm</option>
+                      <option value="mm">mm</option>
                       <option value="m">m</option>
                     </select>
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">Actual Height</label>
+                  <label className="text-xs text-slate-400 block mb-1">Actual Breadth</label>
                   <input
                     type="number"
                     step="0.1"
                     min="0.1"
                     value={correctionHeight}
                     onChange={(e) => setCorrectionHeight(e.target.value)}
-                    placeholder="e.g., 190"
+                    placeholder="e.g., 18"
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:border-emerald-400 focus:outline-none"
                   />
                 </div>
               </div>
+
+              {correctionWidth && correctionHeight && (
+                <div className="p-2.5 bg-slate-900 border border-teal-800 rounded-lg text-xs font-mono flex items-center justify-between text-teal-300">
+                  <span>Calculated Area:</span>
+                  <span className="font-bold">
+                    {((parseFloat(correctionWidth) || 0) * (parseFloat(correctionHeight) || 0)).toFixed(1)} {correctionUnit}²
+                  </span>
+                </div>
+              )}
 
               <div className="p-3 bg-slate-900/50 rounded-lg border border-slate-700 text-xs text-slate-400">
                 <div className="flex items-center gap-1 mb-1">

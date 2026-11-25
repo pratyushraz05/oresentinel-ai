@@ -28,6 +28,10 @@ interface MeasurementWebcamFeedProps {
   setObjectDistanceCm?: (d: number) => void;
   hasConfirmedDistance?: boolean;
   setHasConfirmedDistance?: (b: boolean) => void;
+  refBlockLengthCm?: number;
+  setRefBlockLengthCm?: (l: number) => void;
+  refBlockBreadthCm?: number;
+  setRefBlockBreadthCm?: (b: number) => void;
 }
 
 export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
@@ -55,7 +59,19 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
   setObjectDistanceCm,
   hasConfirmedDistance = true,
   setHasConfirmedDistance,
+  refBlockLengthCm: propRefLength,
+  setRefBlockLengthCm: propSetRefLength,
+  refBlockBreadthCm: propRefBreadth,
+  setRefBlockBreadthCm: propSetRefBreadth,
 }) => {
+  const [internalRefLength, setInternalRefLength] = useState<number>(25.0);
+  const [internalRefBreadth, setInternalRefBreadth] = useState<number>(18.0);
+
+  const refBlockLengthCm = propRefLength ?? internalRefLength;
+  const setRefBlockLengthCm = propSetRefLength ?? setInternalRefLength;
+  const refBlockBreadthCm = propRefBreadth ?? internalRefBreadth;
+  const setRefBlockBreadthCm = propSetRefBreadth ?? setInternalRefBreadth;
+
   const [liveFps, setLiveFps] = useState(0);
   const [detectionCount, setDetectionCount] = useState(0);
   const [maxCaliberMm, setMaxCaliberMm] = useState(0);
@@ -160,6 +176,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
         // Measurement label in Centimeters (cm)
         const majorCm = (d.major_axis_mm / 10).toFixed(1);
         const minorCm = (d.minor_axis_mm / 10).toFixed(1);
+        const areaCm2 = ((d.major_axis_mm * d.minor_axis_mm) / 100).toFixed(1);
         const label = isOver
           ? `OBJECT #${d.rock_index}: ${majorCm} cm (${Math.round(d.major_axis_mm)} mm) [OVERSIZE]`
           : isWarn
@@ -167,8 +184,8 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
           : `OBJECT #${d.rock_index}: ${majorCm} cm (${Math.round(d.major_axis_mm)} mm)`;
 
         ctx.font = "bold 12px monospace";
-        const tagW = Math.max(ctx.measureText(label).width + 16, 210);
-        const tagH = 30;
+        const tagW = Math.max(ctx.measureText(label).width + 16, 260);
+        const tagH = 34;
         const tagY = Math.max(tagH + 4, y - 4);
 
         ctx.fillStyle = "rgba(9, 14, 18, 0.92)";
@@ -178,14 +195,14 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
         ctx.strokeRect(x, tagY - tagH, tagW, tagH);
 
         ctx.fillStyle = "#ffffff";
-        ctx.fillText(label, x + 6, tagY - 12);
+        ctx.fillText(label, x + 6, tagY - 16);
 
         ctx.font = "10px monospace";
         ctx.fillStyle = color;
         ctx.fillText(
-          `W: ${majorCm} cm | H: ${minorCm} cm | D: ${objectDistanceCm} cm | ${d.model_name.includes("YOLO") ? "YOLOv8" : "Salient Object"}`,
+          `L: ${majorCm} cm | B: ${minorCm} cm | Area: ${areaCm2} cm² | Dist: ${objectDistanceCm} cm`,
           x + 6,
-          tagY + 4
+          tagY - 4
         );
       });
     }
@@ -231,11 +248,14 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
 
       // Calculate approximate cm for drawn box
       const effectiveScale = calibMmPerPx > 0 ? calibMmPerPx : 0.8;
-      const estWidthCm = ((boxW * effectiveScale) / 10).toFixed(1);
-      const estHeightCm = ((boxH * effectiveScale) / 10).toFixed(1);
+      const boxLengthCm = (Math.max(boxW, boxH) * effectiveScale) / 10;
+      const boxBreadthCm = (Math.min(boxW, boxH) * effectiveScale) / 10;
+      const estLengthCm = boxLengthCm.toFixed(1);
+      const estBreadthCm = boxBreadthCm.toFixed(1);
+      const estAreaCm2 = (boxLengthCm * boxBreadthCm).toFixed(1);
 
-      // Dimension Tag
-      const userTag = `Selected Object Box: ~${estWidthCm} cm × ~${estHeightCm} cm`;
+      // Dimension Tag with Length, Breadth, and Area
+      const userTag = `Selected Object: ${estLengthCm} cm (L) × ${estBreadthCm} cm (B) | Area: ${estAreaCm2} cm²`;
       ctx.font = "bold 12px monospace";
       const tagW = ctx.measureText(userTag).width + 16;
       const tagH = 28;
@@ -453,7 +473,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
           className={`absolute inset-0 w-full h-full ${isAdjustingBox ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"} ${isCameraActive ? "block" : "hidden"}`}
         />
 
-        {/* Step 1 Required: Ask user how far the object is kept from the camera */}
+        {/* Step 1 Required: Ask user how far the object is kept from the camera & block dimensions */}
         {isCameraActive && !hasConfirmedDistance && (
           <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-30 animate-in fade-in">
             <div className="max-w-md w-full bg-[#071613] border-2 border-emerald-500 rounded-2xl p-6 shadow-2xl space-y-4">
@@ -462,45 +482,105 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
               </div>
               <div>
                 <span className="px-2 py-0.5 rounded bg-emerald-950 border border-emerald-600 text-emerald-300 font-mono text-[10px] font-bold uppercase tracking-wider">
-                  Step 1: Distance Setup
+                  Step 1: Calibration &amp; Sizing Setup
                 </span>
                 <h3 className="text-lg font-bold text-white mt-1.5">
-                  How far is the object kept from the camera?
+                  Distance &amp; Object Block Sizing
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Enter the approximate distance from your camera lens to the object. The system uses this to calculate physical focal scale.
+                  Specify distance and reference block dimensions to initialize high-accuracy millimeter caliber measurements.
                 </p>
               </div>
 
-              <div className="flex items-center justify-center gap-2">
-                <input
-                  type="number"
-                  step="1"
-                  min="5"
-                  max="500"
-                  value={objectDistanceCm}
-                  onChange={(e) => setObjectDistanceCm && setObjectDistanceCm(Math.max(5, parseFloat(e.target.value) || 50))}
-                  className="w-32 px-4 py-2 bg-slate-900 border-2 border-emerald-500 rounded-xl text-center text-xl font-bold font-mono text-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                />
-                <span className="text-base font-bold text-emerald-400 font-mono">cm</span>
+              {/* Distance Setup */}
+              <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-xl space-y-2">
+                <div className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                  <span>Camera-to-Object Distance:</span>
+                  <span className="text-emerald-400 font-mono font-bold">{objectDistanceCm} cm</span>
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <input
+                    type="number"
+                    step="1"
+                    min="5"
+                    max="500"
+                    value={objectDistanceCm}
+                    onChange={(e) => setObjectDistanceCm && setObjectDistanceCm(Math.max(5, parseFloat(e.target.value) || 50))}
+                    className="w-28 px-3 py-1.5 bg-slate-950 border border-emerald-500 rounded-lg text-center text-lg font-bold font-mono text-white focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  />
+                  <span className="text-sm font-bold text-emerald-400 font-mono">cm</span>
+                </div>
+
+                {/* Quick Distance Presets */}
+                <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1">
+                  {[30, 50, 75, 100, 150].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setObjectDistanceCm && setObjectDistanceCm(d)}
+                      className={`px-2.5 py-0.5 rounded text-xs font-mono font-semibold transition-colors cursor-pointer ${
+                        objectDistanceCm === d
+                          ? "bg-emerald-500 text-slate-950 font-bold shadow"
+                          : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      {d} cm
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Quick Distance Presets */}
-              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-                {[30, 50, 75, 100, 150].map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setObjectDistanceCm && setObjectDistanceCm(d)}
-                    className={`px-3 py-1 rounded-lg text-xs font-mono font-semibold transition-colors cursor-pointer ${
-                      objectDistanceCm === d
-                        ? "bg-emerald-500 text-slate-950 font-bold shadow"
-                        : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                    }`}
-                  >
-                    {d} cm
-                  </button>
-                ))}
+              {/* Block Sizing: Length and Breadth inputs */}
+              <div className="p-3 bg-slate-900/70 border border-teal-900/80 rounded-xl space-y-2.5">
+                <div className="text-xs font-semibold text-teal-300 flex items-center justify-between">
+                  <span>Reference Block Sizing:</span>
+                  <span className="text-[10px] text-teal-400/80 font-mono">Centimeter (cm)</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-left">
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                      Length (cm)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        value={refBlockLengthCm}
+                        onChange={(e) => setRefBlockLengthCm && setRefBlockLengthCm(Math.max(0.1, parseFloat(e.target.value) || 0.1))}
+                        placeholder="e.g. 25.0"
+                        className="w-full px-3 py-1.5 bg-slate-950 border border-teal-600 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-teal-400"
+                      />
+                      <span className="absolute right-2 top-1.5 text-[10px] font-mono text-teal-500">cm</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                      Breadth (cm)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        value={refBlockBreadthCm}
+                        onChange={(e) => setRefBlockBreadthCm && setRefBlockBreadthCm(Math.max(0.1, parseFloat(e.target.value) || 0.1))}
+                        placeholder="e.g. 18.0"
+                        className="w-full px-3 py-1.5 bg-slate-950 border border-teal-600 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-teal-400"
+                      />
+                      <span className="absolute right-2 top-1.5 text-[10px] font-mono text-teal-500">cm</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Calculated Block Surface Area at Bottom */}
+                <div className="p-2 bg-slate-950/90 border border-teal-800/80 rounded-lg text-xs font-mono flex items-center justify-between text-teal-200">
+                  <span>Block Surface Area:</span>
+                  <span className="text-teal-400 font-bold text-sm">
+                    {(refBlockLengthCm * refBlockBreadthCm).toFixed(1)} <span className="text-xs font-normal text-teal-500">cm²</span>
+                  </span>
+                </div>
               </div>
 
               <button
@@ -508,7 +588,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
                 onClick={() => setHasConfirmedDistance && setHasConfirmedDistance(true)}
                 className="w-full py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold rounded-xl text-sm transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer"
               >
-                <span>Confirm Distance &amp; Start Detection</span>
+                <span>Confirm Setup &amp; Start Detection</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -582,20 +662,21 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
           <div className="absolute bottom-3 inset-x-3 flex items-center justify-between pointer-events-none">
             <div className="bg-black/80 backdrop-blur px-3 py-1.5 rounded-xl border border-emerald-600/50 flex items-center space-x-3 text-xs font-mono shadow-md">
               <div>
-                <span className="text-slate-400">MAX SIZE: </span>
+                <span className="text-slate-400">MAX CALIBER: </span>
                 <span className={`font-bold ${maxCaliberMm >= throatLimitMm ? "text-rose-400 animate-pulse" : maxCaliberMm >= throatLimitMm * 0.8 ? "text-amber-400" : "text-emerald-400"}`}>
                   {(maxCaliberMm / 10).toFixed(1)} cm <span className="text-[10px] text-slate-400 font-normal">({Math.round(maxCaliberMm)} mm)</span>
                 </span>
               </div>
               <span className="text-slate-600">|</span>
               <div>
-                <span className="text-slate-400">LIMIT: </span>
-                <span className="text-white font-bold">{(throatLimitMm / 10).toFixed(1)} cm</span>
+                <span className="text-slate-400">DIST: </span>
+                <span className="text-white font-bold">{objectDistanceCm} cm</span>
               </div>
               <span className="text-slate-600">|</span>
               <div>
-                <span className="text-slate-400">SCALE: </span>
-                <span className="text-teal-300 font-bold">{calibrationScale.toFixed(1)}x</span>
+                <span className="text-slate-400">BLOCK: </span>
+                <span className="text-teal-300 font-bold">{refBlockLengthCm}×{refBlockBreadthCm} cm</span>
+                <span className="text-[10px] text-teal-400 ml-1">({(refBlockLengthCm * refBlockBreadthCm).toFixed(0)} cm²)</span>
               </div>
             </div>
 
