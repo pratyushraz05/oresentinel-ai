@@ -377,8 +377,10 @@ async def direct_calibration_endpoint(
 
         db.commit()
 
-        # Save to filesystem
+        # Save to filesystem across all active webcam and system targets
         calib_file = BASE_DIR / "calibration" / f"calib_{req.camera_id}.json"
+        webcam_calib_file = BASE_DIR / "calibration" / "calib_CAM-01-WEBCAM.json"
+        measure_calib_file = BASE_DIR / "calibration" / "calib_CAM-WEBCAM-MEASURE.json"
         active_calib_file = BASE_DIR / "calibration" / "calib_system_active.json"
         try:
             calib_file.parent.mkdir(parents=True, exist_ok=True)
@@ -399,6 +401,10 @@ async def direct_calibration_endpoint(
                 "focal_length_px": focal_length_px
             }
             with open(calib_file, "w") as f:
+                json.dump(payload, f, indent=2)
+            with open(webcam_calib_file, "w") as f:
+                json.dump(payload, f, indent=2)
+            with open(measure_calib_file, "w") as f:
                 json.dump(payload, f, indent=2)
             with open(active_calib_file, "w") as f:
                 json.dump(payload, f, indent=2)

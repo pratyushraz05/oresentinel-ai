@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { Camera, Zap, Play, Pause, Sliders, AlertTriangle, Ruler, ArrowRight } from "lucide-react";
+import { Camera, Zap, Play, Pause, Sliders, AlertTriangle, Ruler, ArrowRight, Edit3 } from "lucide-react";
 import { sendRealtimeFrame } from "../api";
 import type { RealtimeFrameResponse, RealtimeDetectionBox } from "../types";
 
@@ -473,6 +473,24 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
           className={`absolute inset-0 w-full h-full ${isAdjustingBox ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"} ${isCameraActive ? "block" : "hidden"}`}
         />
 
+        {/* Manual Box Mode Active Guidance */}
+        {isCameraActive && isAdjustingBox && (
+          <div className="absolute top-14 inset-x-4 bg-cyan-950/95 border border-cyan-400 rounded-xl px-4 py-2 flex items-center justify-between text-xs font-mono text-cyan-200 shadow-xl backdrop-blur-md animate-in fade-in z-20">
+            <div className="flex items-center space-x-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+              <span className="font-bold text-white">MANUAL BOXING:</span>
+              <span>Click &amp; drag on the camera to select your object, then enter real dimensions in the panel.</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsAdjustingBox && setIsAdjustingBox(false)}
+              className="px-2.5 py-1 rounded bg-cyan-900 border border-cyan-600 text-[11px] text-white hover:bg-cyan-800 cursor-pointer font-bold"
+            >
+              Done
+            </button>
+          </div>
+        )}
+
         {/* Step 1 Required: Ask user how far the object is kept from the camera & block dimensions */}
         {isCameraActive && !hasConfirmedDistance && (
           <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-30 animate-in fade-in">
@@ -648,6 +666,21 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
             </div>
 
             <div className="flex items-center space-x-2 pointer-events-auto">
+              {/* Manual Object Rectangle Selection Option */}
+              <button
+                type="button"
+                onClick={() => setIsAdjustingBox && setIsAdjustingBox(!isAdjustingBox)}
+                className={`p-1.5 px-2.5 rounded-lg border text-xs cursor-pointer transition-colors backdrop-blur flex items-center gap-1.5 font-mono ${
+                  isAdjustingBox
+                    ? "bg-cyan-500 text-slate-950 font-bold border-cyan-400 shadow-lg shadow-cyan-500/30"
+                    : "bg-black/80 border-cyan-700/60 text-cyan-300 hover:text-white hover:bg-cyan-950/80"
+                }`}
+                title="Select rectangle manually on camera if object is not detected properly"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>{isAdjustingBox ? "Boxing Active" : "Select Rectangle"}</span>
+              </button>
+
               <button
                 onClick={() => setShowCalibrationDrawer(!showCalibrationDrawer)}
                 title="Calibration Settings"

@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   Camera, Zap, Volume2, VolumeX, ShieldAlert,
-  Play, Pause, Sliders, CheckCircle2, Siren
+  Play, Pause, Sliders, CheckCircle2, Siren, Edit3
 } from "lucide-react";
-import { sendRealtimeFrame, acknowledgeIncident, linkOutcome, fetchSystemCalibrationStatus, type SystemCalibrationStatus } from "../api";
+import {
+  sendRealtimeFrame, acknowledgeIncident, linkOutcome,
+  fetchSystemCalibrationStatus, directRecalibrate, type SystemCalibrationStatus
+} from "../api";
 import { soundAlert } from "../utils/audioAlert";
 import type { Incident, RealtimeFrameResponse, RealtimeDetectionBox } from "../types";
 
@@ -12,6 +15,8 @@ interface LiveWebcamFeedProps {
   defaultThroatLimitMm?: number;
   showControls?: boolean;
   compact?: boolean;
+  systemCalibration?: SystemCalibrationStatus | null;
+  onCalibrationUpdated?: () => void;
 }
 
 export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
@@ -19,6 +24,8 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
   defaultThroatLimitMm = 800,
   showControls = true,
   compact = false,
+  systemCalibration: propSystemCalib,
+  onCalibrationUpdated,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -28,23 +35,58 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
   const [isProcessingLoop, setIsProcessingLoop] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
-  // Calibration parameters
+  // Calibration parameters & distance
   const [throatLimitMm, setThroatLimitMm] = useState<number>(defaultThroatLimitMm);
-  const [calibrationScale, setCalibrationScale] = useState<number>(1.2);
+  const [calibrationScale, setCalibrationScale] = useState<number>(1.0);
+  const [objectDistanceCm, setObjectDistanceCm] = useState<number>(propSystemCalib?.distance_cm || 50.0);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [showCalibrationDrawer, setShowCalibrationDrawer] = useState<boolean>(false);
-  const [systemCalib, setSystemCalib] = useState<SystemCalibrationStatus | null>(null);
+  const [systemCalib, setSystemCalib] = useState<SystemCalibrationStatus | null>(propSystemCalib || null);
 
-  // Load system-wide calibration on mount
-  useEffect(() => {
-    fetchSystemCalibrationStatus()
-      .then((calib) => {
-        if (calib && calib.is_calibrated) {
-          setSystemCalib(calib);
+  // Manual Box Adjustment / Recalibration State
+  const [isAdjustingBox, setIsAdjustingBox] = useState<boolean>(false);
+  const [customBox, setCustomBox] = useState<[number, number, number, number] | null>(null);
+  const [isDrawing, setIsDrawing] = useState<boolean>(false);
+  const [startPoint, setStartPoint] = useState<{ x: number; y: number } | null>(null);
+  const [dragBox, setDragBox] = useState<[number, number, number, number] | null>(null);
+  const [manualLengthCm, setManualLengthCm] = useState<string>("25.0");
+  const [manualBreadthCm, setManualBreadthCm] = useState<string>("18.0");
+  const [isRecalibrating, setIsRecalibrating] = useState<boolean>(false);
+  const [recalibMessage, setRecalibMessage] = useState<string | null>(null);
+
+  // Multi-frame crusher verification: check 4 times on slow-moving conveyor before trip
+  const REQUIRED_OVERSIZE_CHECKS = 4;
+  const consecutiveOversizeRef = useRef<number>(0);
+  const [oversizeCheckCount, setOversizeCheckCount] = useState<number>(0);
+  const [isVerifyingOversize, setIsVerifyingOversize] = useState<boolean>(false);
+
+  // Load / sync system-wide calibration
+  const refreshCalibration = useCallback(async () => {
+    try {
+      const calib = await fetchSystemCalibrationStatus();
+      if (calib && calib.is_calibrated) {
+        setSystemCalib(calib);
+        setCalibrationScale(1.0);
+        if (calib.distance_cm) {
+          setObjectDistanceCm(calib.distance_cm);
         }
-      })
-      .catch((err) => console.warn("Could not fetch active system calibration for live feed:", err));
+      }
+    } catch (err) {
+      console.warn("Could not fetch active system calibration for live feed:", err);
+    }
   }, []);
+
+  useEffect(() => {
+    if (propSystemCalib?.is_calibrated) {
+      setSystemCalib(propSystemCalib);
+      setCalibrationScale(1.0);
+      if (propSystemCalib.distance_cm) {
+        setObjectDistanceCm(propSystemCalib.distance_cm);
+      }
+    } else {
+      refreshCalibration();
+    }
+  }, [propSystemCalib, refreshCalibration]);
 
   // Live telemetry
   const [liveFps, setLiveFps] = useState<number>(0);
@@ -92,6 +134,85 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
       videoRef.current.srcObject = null;
     }
     setIsCameraActive(false);
+    consecutiveOversizeRef.current = 0;
+    setOversizeCheckCount(0);
+    setIsVerifyingOversize(false);
+  };
+
+  // Pointer / touch handlers for manual box drawing on live webcam
+  const getNormalizedPoint = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+    const clientX = "touches" in e ? (e.touches[0]?.clientX ?? 0) : e.clientX;
+    const clientY = "touches" in e ? (e.touches[0]?.clientY ?? 0) : e.clientY;
+    const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    return { x, y };
+  };
+
+  const handlePointerDown = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    if (!isAdjustingBox) return;
+    const pt = getNormalizedPoint(e);
+    setIsDrawing(true);
+    setStartPoint(pt);
+    setDragBox([pt.x, pt.y, 0.01, 0.01]);
+  };
+
+  const handlePointerMove = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    if (!isAdjustingBox || !isDrawing || !startPoint) return;
+    const pt = getNormalizedPoint(e);
+    const minX = Math.min(startPoint.x, pt.x);
+    const minY = Math.min(startPoint.y, pt.y);
+    const w = Math.max(0.02, Math.abs(pt.x - startPoint.x));
+    const h = Math.max(0.02, Math.abs(pt.y - startPoint.y));
+    setDragBox([minX, minY, w, h]);
+  };
+
+  const handlePointerUp = () => {
+    if (!isAdjustingBox) return;
+    setIsDrawing(false);
+    if (dragBox && dragBox[2] > 0.02 && dragBox[3] > 0.02) {
+      setCustomBox(dragBox);
+    }
+    setStartPoint(null);
+  };
+
+  // Direct recalibration on user-drawn box
+  const handleRecalibrateBox = async () => {
+    const lCm = parseFloat(manualLengthCm);
+    const bCm = parseFloat(manualBreadthCm);
+    const dCm = objectDistanceCm || 50;
+    if (isNaN(lCm) || isNaN(bCm) || lCm <= 0 || bCm <= 0) {
+      alert("Please enter valid length and breadth in centimeters (e.g. 25.0 cm).");
+      return;
+    }
+    setIsRecalibrating(true);
+    try {
+      const box = customBox || [0.25, 0.25, 0.5, 0.5];
+      const imgW = videoRef.current?.videoWidth || 1280;
+      const imgH = videoRef.current?.videoHeight || 720;
+      await directRecalibrate({
+        camera_id: "CAM-WEBCAM-MEASURE",
+        box: box,
+        actual_width_cm: Math.max(lCm, bCm),
+        actual_height_cm: Math.min(lCm, bCm),
+        distance_cm: dCm,
+        image_width: imgW,
+        image_height: imgH,
+        notes: `User calibrated box: ${lCm}x${bCm}cm at ${dCm}cm`
+      });
+      const freshCalib = await fetchSystemCalibrationStatus();
+      setSystemCalib(freshCalib);
+      setCalibrationScale(1.0);
+      setRecalibMessage(`Calibrated successfully! System scale synchronized at ${dCm} cm.`);
+      setIsAdjustingBox(false);
+      onCalibrationUpdated?.();
+      setTimeout(() => setRecalibMessage(null), 6000);
+    } catch (err: any) {
+      alert(`Calibration failed: ${err.message || err}`);
+    } finally {
+      setIsRecalibrating(false);
+    }
   };
 
   // Canvas drawing routine
@@ -242,7 +363,55 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
         tagY - 6
       );
     });
-  }, [systemCalib]);
+
+    // Render manual drawn/adjusted box if active
+    const boxToDraw = dragBox || customBox;
+    if (isAdjustingBox && boxToDraw) {
+      const [bx, by, bw, bh] = boxToDraw;
+      const x = bx * w;
+      const y = by * h;
+      const boxW = bw * w;
+      const boxH = bh * h;
+
+      ctx.fillStyle = "rgba(6, 182, 212, 0.15)";
+      ctx.fillRect(x, y, boxW, boxH);
+
+      ctx.strokeStyle = "#06b6d4";
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x, y, boxW, boxH);
+      ctx.setLineDash([]);
+
+      const handleSize = 8;
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = "#06b6d4";
+      ctx.lineWidth = 2;
+      [
+        [x, y], [x + boxW, y], [x, y + boxH], [x + boxW, y + boxH]
+      ].forEach(([hx, hy]) => {
+        ctx.fillRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
+        ctx.strokeRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize);
+      });
+
+      const effectiveMmPerPx = (systemCalib?.is_calibrated && systemCalib.mm_per_pixel) ? systemCalib.mm_per_pixel : 0.8;
+      const estLengthCm = ((Math.max(boxW, boxH) * effectiveMmPerPx) / 10).toFixed(1);
+      const estBreadthCm = ((Math.min(boxW, boxH) * effectiveMmPerPx) / 10).toFixed(1);
+      const estAreaCm2 = (parseFloat(estLengthCm) * parseFloat(estBreadthCm)).toFixed(1);
+      const userTag = `Selected Object: ${estLengthCm} cm (L) × ${estBreadthCm} cm (B) | Area: ${estAreaCm2} cm²`;
+
+      ctx.font = "bold 12px monospace";
+      const tagW = ctx.measureText(userTag).width + 16;
+      const tagH = 28;
+      const tagY = Math.max(tagH + 6, y - 6);
+      ctx.fillStyle = "rgba(8, 28, 36, 0.95)";
+      ctx.fillRect(x, tagY - tagH, tagW, tagH);
+      ctx.strokeStyle = "#06b6d4";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x, tagY - tagH, tagW, tagH);
+      ctx.fillStyle = "#38bdf8";
+      ctx.fillText(userTag, x + 8, tagY - 8);
+    }
+  }, [systemCalib, isAdjustingBox, dragBox, customBox]);
 
   // Frame processing step
   const processFrame = useCallback(async () => {
@@ -279,11 +448,15 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
         }
 
         try {
+          // Continuous multi-frame crusher check: require 4 consecutive oversize frames before creating an incident
+          const isFinalConfirmation = consecutiveOversizeRef.current >= (REQUIRED_OVERSIZE_CHECKS - 1);
+
           const resp: RealtimeFrameResponse = await sendRealtimeFrame(blob, {
             calibrationScale,
             throatLimitMm,
-            autoCreateIncident: true,
-            sourceId: "CAM-01-WEBCAM",
+            autoCreateIncident: isFinalConfirmation,
+            sourceId: "CAM-WEBCAM-MEASURE",
+            distanceCm: objectDistanceCm,
           });
 
           setLiveFps(resp.fps);
@@ -291,27 +464,45 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
           setMaxCaliberMm(resp.max_caliber_mm);
           setLiveSeverity(resp.severity);
 
+          // Multi-frame crusher verification logic
+          const hasOversizeInFrame = resp.severity === "CRITICAL_OVERSIZE" || resp.max_caliber_mm >= throatLimitMm || resp.detections.some(d => d.is_oversize);
+
+          if (hasOversizeInFrame) {
+            consecutiveOversizeRef.current += 1;
+            const currentChecks = consecutiveOversizeRef.current;
+            setOversizeCheckCount(currentChecks);
+
+            if (currentChecks < REQUIRED_OVERSIZE_CHECKS) {
+              // Frame 1, 2, or 3: Keep detecting size again and again!
+              setIsVerifyingOversize(true);
+              soundAlert.playWarningBeep();
+            } else {
+              // 4 consecutive frames verified oversize: now trip conveyor & alert operator!
+              setIsVerifyingOversize(false);
+              soundAlert.playCriticalSiren();
+
+              if (resp.incident_created && resp.incident) {
+                setActiveIncident(resp.incident);
+                setCountdownSec(180);
+                setActionSuccessMessage(null);
+                if (onIncidentTriggered) {
+                  onIncidentTriggered(resp.incident);
+                }
+              }
+            }
+          } else {
+            // If caliber is within limit or conveyor is clear, decay counter
+            if (consecutiveOversizeRef.current > 0) {
+              consecutiveOversizeRef.current = Math.max(0, consecutiveOversizeRef.current - 1);
+              setOversizeCheckCount(consecutiveOversizeRef.current);
+              if (consecutiveOversizeRef.current === 0) {
+                setIsVerifyingOversize(false);
+              }
+            }
+          }
+
           // Render Bounding Boxes on Overlay
           renderOverlay(resp.detections, throatLimitMm, resp.fps);
-
-          // Audio Siren Handling
-          if (resp.alert_triggered) {
-            if (resp.severity === "CRITICAL_OVERSIZE") {
-              soundAlert.playCriticalSiren();
-            } else if (resp.severity === "HIGH_RISK") {
-              soundAlert.playWarningBeep();
-            }
-          }
-
-          // Incident Triggered
-          if (resp.incident_created && resp.incident) {
-            setActiveIncident(resp.incident);
-            setCountdownSec(180);
-            setActionSuccessMessage(null);
-            if (onIncidentTriggered) {
-              onIncidentTriggered(resp.incident);
-            }
-          }
         } catch (err) {
           console.warn("Realtime inference tick error:", err);
         } finally {
@@ -321,7 +512,7 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
     } catch {
       isSendingRef.current = false;
     }
-  }, [isCameraActive, isProcessingLoop, calibrationScale, throatLimitMm, renderOverlay, onIncidentTriggered]);
+  }, [isCameraActive, isProcessingLoop, calibrationScale, throatLimitMm, objectDistanceCm, renderOverlay, onIncidentTriggered]);
 
   // Main stream loop interval (~5 FPS = 200ms)
   useEffect(() => {
@@ -449,6 +640,18 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
                 <ShieldAlert className="w-4 h-4" />
                 <span>SCADA Trip</span>
               </button>
+              <button
+                onClick={() => {
+                  setActiveIncident(null);
+                  consecutiveOversizeRef.current = 0;
+                  setOversizeCheckCount(0);
+                  setIsVerifyingOversize(false);
+                }}
+                className="px-3 py-2 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 text-xs font-semibold cursor-pointer border border-slate-700 transition-colors"
+                title="Reset alert and scan next rock on conveyor"
+              >
+                Scan Next Rock &rarr;
+              </button>
             </div>
           </div>
         </div>
@@ -462,8 +665,22 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
         </div>
       )}
 
-      {/* Video Viewfinder Container */}
-      <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-700/60 bg-black aspect-video shadow-2xl flex items-center justify-center group">
+      {/* Video Viewfinder Container with Mouse & Touch Drawing */}
+      <div
+        onMouseDown={handlePointerDown}
+        onMouseMove={handlePointerMove}
+        onMouseUp={handlePointerUp}
+        onTouchStart={handlePointerDown}
+        onTouchMove={handlePointerMove}
+        onTouchEnd={handlePointerUp}
+        className={`relative rounded-2xl overflow-hidden border-2 aspect-video shadow-2xl flex items-center justify-center group transition-all ${
+          isAdjustingBox
+            ? "border-cyan-400 ring-4 ring-cyan-500/30 cursor-crosshair select-none bg-black"
+            : isCameraActive
+            ? "border-emerald-700/60 bg-black"
+            : "border-slate-800 bg-[#050c0b]"
+        }`}
+      >
         <video
           ref={videoRef}
           autoPlay
@@ -475,8 +692,52 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
         {/* Real-time Bounding Box Canvas Overlay */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full pointer-events-none"
+          className={`absolute inset-0 w-full h-full ${isAdjustingBox ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"}`}
         />
+
+        {/* Multi-frame Crusher Conveyor Verification Overlay */}
+        {isVerifyingOversize && (
+          <div className="absolute top-14 inset-x-4 bg-amber-950/95 border-2 border-amber-500 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-2xl backdrop-blur-md animate-in fade-in z-20">
+            <div className="flex items-center space-x-3">
+              <div className="w-9 h-9 rounded-lg bg-amber-500/20 border border-amber-400 flex items-center justify-center text-amber-300 font-bold font-mono text-sm shrink-0">
+                {oversizeCheckCount}/{REQUIRED_OVERSIZE_CHECKS}
+              </div>
+              <div>
+                <div className="text-xs font-bold font-mono text-white flex items-center gap-2">
+                  <span className="text-amber-400 animate-pulse">SLOW CRUSHER BELT VERIFYING</span>
+                  <span>(Check {oversizeCheckCount} of {REQUIRED_OVERSIZE_CHECKS})</span>
+                </div>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  Object measures ~{(maxCaliberMm / 10).toFixed(1)} cm (limit {(throatLimitMm / 10).toFixed(1)} cm). Re-measuring continuously as object advances towards crusher...
+                </p>
+              </div>
+            </div>
+            <div className="w-full sm:w-36 bg-slate-900 rounded-full h-3 overflow-hidden border border-amber-700 shrink-0">
+              <div
+                className="bg-amber-400 h-full transition-all duration-150"
+                style={{ width: `${(oversizeCheckCount / REQUIRED_OVERSIZE_CHECKS) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Manual Box Mode Active Guidance */}
+        {isAdjustingBox && (
+          <div className="absolute top-14 inset-x-4 bg-cyan-950/95 border border-cyan-400 rounded-xl px-4 py-2 flex items-center justify-between text-xs font-mono text-cyan-200 shadow-xl backdrop-blur-md animate-in fade-in z-20">
+            <div className="flex items-center space-x-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+              <span className="font-bold text-white">MANUAL BOXING:</span>
+              <span>Click &amp; drag on the camera to draw rectangle over object.</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsAdjustingBox(false)}
+              className="px-2 py-0.5 rounded bg-cyan-900 border border-cyan-600 text-[11px] text-white hover:bg-cyan-800 cursor-pointer"
+            >
+              Done
+            </button>
+          </div>
+        )}
 
         {/* Industrial Viewfinder Top HUD Bar */}
         <div className="absolute top-3 inset-x-3 flex items-center justify-between pointer-events-none">
@@ -494,9 +755,41 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
               <span>ROCKS:</span>
               <span className="text-emerald-400 font-bold">{detectionCount}</span>
             </div>
+
+            {/* Clickable Camera Distance Badge */}
+            <div
+              className="bg-black/80 backdrop-blur px-2.5 py-1 rounded-lg text-xs font-mono text-cyan-300 border border-cyan-700/60 flex items-center space-x-1.5 shadow-md pointer-events-auto"
+              title="Camera-to-object distance. Pinhole geometry computes calibrated caliber."
+            >
+              <span>DIST:</span>
+              <input
+                type="number"
+                min="5"
+                max="400"
+                step="1"
+                value={objectDistanceCm}
+                onChange={(e) => setObjectDistanceCm(Math.max(5, parseFloat(e.target.value) || 50))}
+                className="w-12 bg-slate-900 border border-cyan-600 rounded text-center text-xs text-white font-bold font-mono focus:outline-none"
+              />
+              <span className="text-[10px] text-cyan-400 font-bold">cm</span>
+            </div>
           </div>
 
           <div className="flex items-center space-x-2 pointer-events-auto">
+            {/* Manual Box / Rectangle Selection */}
+            <button
+              onClick={() => setIsAdjustingBox(!isAdjustingBox)}
+              title="Manually select rectangle over object on camera"
+              className={`p-1.5 px-2.5 rounded-lg border text-xs cursor-pointer transition-colors backdrop-blur flex items-center gap-1.5 font-mono ${
+                isAdjustingBox
+                  ? "bg-cyan-500 text-slate-950 font-bold border-cyan-400 shadow-lg shadow-cyan-500/30"
+                  : "bg-black/80 border-slate-700 text-cyan-300 hover:text-white hover:bg-slate-800"
+              }`}
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>{isAdjustingBox ? "Boxing Active" : "Box Object"}</span>
+            </button>
+
             {/* Audio Toggle */}
             <button
               onClick={toggleSound}
@@ -580,6 +873,112 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
           </div>
         )}
       </div>
+
+      {/* Manual Object Sizing & Calibration Card */}
+      {isAdjustingBox && (
+        <div className="p-4 bg-[#071a1f] border-2 border-cyan-500 rounded-xl space-y-3.5 shadow-xl animate-in fade-in">
+          <div className="flex items-center justify-between pb-2 border-b border-cyan-800/60">
+            <div className="flex items-center gap-2 text-cyan-300 font-semibold text-xs uppercase tracking-wider font-mono">
+              <Zap className="w-4 h-4 text-cyan-400 animate-pulse" />
+              <span>Manual Object Sizing &amp; System Calibration</span>
+            </div>
+            <button
+              onClick={() => setIsAdjustingBox(false)}
+              className="text-xs text-slate-400 hover:text-white cursor-pointer"
+            >
+              Done
+            </button>
+          </div>
+
+          <div className="text-xs text-slate-300 space-y-1">
+            <p className="font-medium text-cyan-200">
+              1. Click &amp; drag on the camera video above to draw the rectangle around your object.
+            </p>
+            <p className="text-slate-400 text-[11px]">
+              2. Enter the actual real-world length and breadth below to calibrate physical scale across the entire system.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                Actual Length
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  value={manualLengthCm}
+                  onChange={(e) => setManualLengthCm(e.target.value)}
+                  placeholder="e.g. 25.0"
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-xs focus:border-cyan-400 focus:outline-none"
+                />
+                <span className="absolute right-2 top-1.5 text-[10px] font-mono text-cyan-500">cm</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                Actual Breadth
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  value={manualBreadthCm}
+                  onChange={(e) => setManualBreadthCm(e.target.value)}
+                  placeholder="e.g. 18.0"
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-xs focus:border-cyan-400 focus:outline-none"
+                />
+                <span className="absolute right-2 top-1.5 text-[10px] font-mono text-cyan-500">cm</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                Distance
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="1"
+                  min="5"
+                  value={objectDistanceCm}
+                  onChange={(e) => setObjectDistanceCm(Math.max(5, parseFloat(e.target.value) || 50))}
+                  placeholder="e.g. 50"
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-xs focus:border-cyan-400 focus:outline-none"
+                />
+                <span className="absolute right-2 top-1.5 text-[10px] font-mono text-cyan-500">cm</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Calculated Area at Bottom */}
+          <div className="p-2.5 bg-slate-900/90 border border-cyan-800/80 rounded-lg text-xs font-mono flex items-center justify-between text-cyan-200">
+            <span>Calculated Surface Area:</span>
+            <span className="text-cyan-400 font-bold">
+              {((parseFloat(manualLengthCm) || 0) * (parseFloat(manualBreadthCm) || 0)).toFixed(1)} cm²
+            </span>
+          </div>
+
+          {recalibMessage && (
+            <div className="p-2.5 bg-emerald-950/70 border border-emerald-600 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{recalibMessage}</span>
+            </div>
+          )}
+
+          <button
+            onClick={handleRecalibrateBox}
+            disabled={isRecalibrating || !manualLengthCm || !manualBreadthCm}
+            className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md disabled:opacity-50"
+          >
+            {isRecalibrating ? "Applying Calibration..." : "Calibrate System on This Rectangle & Save"}
+          </button>
+        </div>
+      )}
 
       {/* Calibration Drawer (Collapsible) */}
       {showCalibrationDrawer && (

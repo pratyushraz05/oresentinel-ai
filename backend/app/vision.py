@@ -38,25 +38,26 @@ def is_valid_rock_candidate(
     img_w: int,
     img_h: int,
     mm_per_pixel: float,
-    min_caliber_mm: float = 75.0,
-    max_area_fraction: float = 0.48
+    min_caliber_mm: float = 25.0,
+    max_area_fraction: float = 0.88
 ) -> tuple[bool, dict]:
     """
     Validates whether a detected contour represents an actual rock piece inside the image,
-    strictly rejecting full-frame backgrounds, walls, or outer border artifacts.
+    strictly rejecting full-frame backgrounds, walls, or outer border artifacts while
+    reliably permitting handheld stones, specimens, and calibrated blocks.
     """
     total_area = float(img_w * img_h)
     area_px = cv2.contourArea(cnt)
 
-    # 1. Reject if too small or too massive (>48% of the entire camera frame)
-    min_area_px = (min_caliber_mm / mm_per_pixel) ** 2 * 0.18
+    # 1. Reject if too small or too massive (>88% of the entire camera frame)
+    min_area_px = max(100.0, (min_caliber_mm / max(0.01, mm_per_pixel)) ** 2 * 0.12)
     if area_px < min_area_px or area_px > (total_area * max_area_fraction):
         return False, {}
 
     x, y, bw, bh = cv2.boundingRect(cnt)
 
-    # 2. Reject if the contour spans almost the entire width or height (frame border / conveyor edge)
-    if bw > (img_w * 0.78) or bh > (img_h * 0.78):
+    # 2. Reject if the contour spans almost the entire width or height (frame border / edge artifact)
+    if bw > (img_w * 0.88) or bh > (img_h * 0.88):
         return False, {}
 
     # 3. Reject if contour touches or hugs image outer frame borders on 2 or more sides
@@ -253,7 +254,7 @@ def detect_boulders_and_measure(
                     bh = max(10, y2 - y1)
 
                     # Reject full-frame or border background boxes
-                    if bw > (w * 0.78) or bh > (h * 0.78) or (bw * bh) > (w * h * 0.48):
+                    if bw > (w * 0.88) or bh > (h * 0.88) or (bw * bh) > (w * h * 0.75):
                         continue
                     m_b = 6
                     touches = sum([x1 <= m_b, y1 <= m_b, x2 >= (w - m_b), y2 >= (h - m_b)])
@@ -825,9 +826,10 @@ def detect_frame_in_memory(
         calibration = get_active_system_calibration()
 
     if calibration:
-        if distance_cm and distance_cm > 0 and hasattr(calibration, "scale_at_distance"):
-            mm_per_pixel = calibration.scale_at_distance(distance_cm)
-            print(f"[CALIB] Using pinhole scaled calibration at {distance_cm}cm: {mm_per_pixel:.4f} mm/px ({(mm_per_pixel/10.0):.4f} cm/px)")
+        dist_to_use = distance_cm if (distance_cm and distance_cm > 0) else getattr(calibration, "distance_cm", 50.0)
+        if dist_to_use and dist_to_use > 0 and hasattr(calibration, "scale_at_distance"):
+            mm_per_pixel = calibration.scale_at_distance(dist_to_use)
+            print(f"[CALIB] Using pinhole scaled calibration at {dist_to_use}cm: {mm_per_pixel:.4f} mm/px ({(mm_per_pixel/10.0):.4f} cm/px)")
         else:
             mm_per_pixel = calibration.mm_per_pixel_avg
             print(f"[CALIB] Using calibrated scale for live feed {source_id or 'webcam'}: {mm_per_pixel:.4f} mm/px ({(mm_per_pixel/10.0):.4f} cm/px)")
@@ -872,7 +874,7 @@ def detect_frame_in_memory(
                     bh = max(10, y2 - y1)
 
                     # Reject full-frame or border background boxes
-                    if bw > (w * 0.78) or bh > (h * 0.78) or (bw * bh) > (w * h * 0.48):
+                    if bw > (w * 0.88) or bh > (h * 0.88) or (bw * bh) > (w * h * 0.75):
                         continue
                     m_b = 6
                     touches = sum([x1 <= m_b, y1 <= m_b, x2 >= (w - m_b), y2 >= (h - m_b)])

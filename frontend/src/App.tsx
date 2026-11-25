@@ -131,6 +131,7 @@ export function App() {
             fixtures={fixtures}
             onIncidentUpdated={loadData}
             onOpenCopilotWithIncident={handleOpenCopilot}
+            systemCalibration={systemCalibration}
           />
         )}
 

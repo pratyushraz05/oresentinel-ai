@@ -5,6 +5,7 @@ import {
   Video
 } from "lucide-react";
 import type { Incident, SpecimenFixture } from "../types";
+import type { SystemCalibrationStatus } from "../api";
 import { runDemonstrationPipeline, acknowledgeIncident, linkOutcome } from "../api";
 import confetti from "canvas-confetti";
 import { LiveWebcamFeed } from "./LiveWebcamFeed";
@@ -13,12 +14,14 @@ interface FlagshipDemoProps {
   fixtures: SpecimenFixture[];
   onIncidentUpdated: () => void;
   onOpenCopilotWithIncident: (incNumber: string) => void;
+  systemCalibration?: SystemCalibrationStatus | null;
 }
 
 export const FlagshipDemo: React.FC<FlagshipDemoProps> = ({
   fixtures,
   onIncidentUpdated,
   onOpenCopilotWithIncident,
+  systemCalibration,
 }) => {
   const [inputMode, setInputMode] = useState<"specimen" | "webcam" | "upload">("specimen");
   const [selectedSpecimen, setSelectedSpecimen] = useState<string>("critical_boulder");
@@ -313,6 +316,8 @@ export const FlagshipDemo: React.FC<FlagshipDemoProps> = ({
                     onIncidentUpdated();
                   }}
                   defaultThroatLimitMm={800}
+                  systemCalibration={systemCalibration}
+                  onCalibrationUpdated={onIncidentUpdated}
                 />
               </div>
             )}

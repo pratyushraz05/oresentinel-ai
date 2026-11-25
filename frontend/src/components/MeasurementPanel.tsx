@@ -203,20 +203,153 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
   };
 
   if (!measurement || !detection) {
+    if (isAdjustingBox) {
+      return (
+        <div className="bg-[#091513] border-2 border-cyan-500 rounded-xl p-4 space-y-4 shadow-xl">
+          <div className="flex items-center justify-between pb-2 border-b border-cyan-800/60">
+            <div className="flex items-center gap-2 text-cyan-300 font-semibold text-xs uppercase tracking-wider font-mono">
+              <Zap className="w-4 h-4 text-cyan-400 animate-pulse" />
+              <span>Manual Object Sizing &amp; Calibration</span>
+            </div>
+            {setIsAdjustingBox && (
+              <button
+                type="button"
+                onClick={() => setIsAdjustingBox(false)}
+                className="text-xs text-slate-400 hover:text-white cursor-pointer"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+
+          <div className="text-xs text-slate-300 space-y-1">
+            <p className="font-medium text-cyan-200">
+              1. Drag/draw the rectangle over your object on the camera screen.
+            </p>
+            <p className="text-slate-400 text-[11px]">
+              2. Enter the actual real-world length and breadth below to calibrate.
+            </p>
+          </div>
+
+          {/* Actual Dimension Inputs (in Centimeters) & Distance */}
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                Actual Length
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  value={actualWidthCmInput || "25.0"}
+                  onChange={(e) => setActualWidthCmInput(e.target.value)}
+                  placeholder="e.g. 25.0"
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-xs focus:border-cyan-400 focus:outline-none"
+                />
+                <span className="absolute right-2 top-1.5 text-[10px] font-mono text-cyan-500">cm</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                Actual Breadth
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  value={actualHeightCmInput || "18.0"}
+                  onChange={(e) => setActualHeightCmInput(e.target.value)}
+                  placeholder="e.g. 18.0"
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-xs focus:border-cyan-400 focus:outline-none"
+                />
+                <span className="absolute right-2 top-1.5 text-[10px] font-mono text-cyan-500">cm</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                Distance
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="1"
+                  min="5"
+                  value={distanceCmInput}
+                  onChange={(e) => setDistanceCmInput(e.target.value)}
+                  placeholder="e.g. 50"
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-xs focus:border-cyan-400 focus:outline-none"
+                />
+                <span className="absolute right-2 top-1.5 text-[10px] font-mono text-cyan-500">cm</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Calculated Area at Bottom */}
+          <div className="p-2.5 bg-slate-900/90 border border-cyan-800/80 rounded-lg text-xs font-mono flex items-center justify-between text-cyan-200">
+            <span>Calculated Surface Area:</span>
+            <span className="text-cyan-400 font-bold">
+              {((parseFloat(actualWidthCmInput || "25.0") || 0) * (parseFloat(actualHeightCmInput || "18.0") || 0)).toFixed(1)} cm²
+            </span>
+          </div>
+
+          {recalibrationSuccess && (
+            <div className="p-2.5 bg-emerald-950/70 border border-emerald-600 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{recalibrationSuccess}</span>
+            </div>
+          )}
+
+          <button
+            onClick={handleRecalibrateClick}
+            disabled={recalibrating}
+            className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md disabled:opacity-50"
+          >
+            {recalibrating ? "Applying Calibration..." : "Calibrate System on This Rectangle & Save"}
+          </button>
+        </div>
+      );
+    }
+
     return (
-      <div className="bg-[#091513] border border-slate-800 rounded-xl p-6 text-center">
-        <Target className="w-12 h-12 mx-auto text-slate-600 mb-3" />
-        <h4 className="text-white font-semibold mb-2">No Measurement Yet</h4>
-        <p className="text-slate-400 text-sm">
-          Point camera at an object to see real-time measurements
-        </p>
+      <div className="bg-[#091513] border border-slate-800 rounded-xl p-5 text-center space-y-4">
+        <Target className="w-10 h-10 mx-auto text-slate-600" />
+        <div>
+          <h4 className="text-white font-semibold text-sm">Waiting for Object</h4>
+          <p className="text-slate-400 text-xs mt-0.5">
+            Hold rock or object inside camera target area
+          </p>
+        </div>
+
+        {/* Feature requested: If camera is not able to detect it in a proper rectangle */}
+        <div className="p-3 bg-cyan-950/40 border border-cyan-700/60 rounded-xl text-left space-y-2">
+          <div className="text-xs font-bold text-cyan-300 flex items-center gap-1.5 font-mono">
+            <Edit3 className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Not detecting in a proper rectangle?</span>
+          </div>
+          <p className="text-[11px] text-slate-300">
+            Select the rectangle yourself on the camera view and enter its actual dimensions to calibrate the system.
+          </p>
+          <button
+            type="button"
+            onClick={() => setIsAdjustingBox && setIsAdjustingBox(true)}
+            className="w-full py-2 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow transition-all"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>Select Rectangle Manually on Camera</span>
+          </button>
+        </div>
+
         {!isCalibrated && (
           <button
             onClick={onCalibrationClick}
-            className="mt-4 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm flex items-center gap-2 mx-auto transition-colors"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center gap-2 mx-auto transition-colors cursor-pointer"
           >
-            <Ruler className="w-4 h-4" />
-            Calibrate Camera
+            <Ruler className="w-3.5 h-3.5" />
+            Calibrate with Reference Card
           </button>
         )}
       </div>
