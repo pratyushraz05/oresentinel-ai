@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from .database import get_db
 from .models import CameraCalibration
-from .calibration import compute_calibration, get_calibration as get_calibration_file
+from .calibration import compute_calibration, get_calibration as get_calibration_file, get_active_system_calibration
 from .config import BASE_DIR
 
 router = APIRouter(prefix="/api/measurement", tags=["Measurement"])
@@ -357,23 +357,27 @@ async def direct_calibration_endpoint(
 
         # Save to filesystem
         calib_file = BASE_DIR / "calibration" / f"calib_{req.camera_id}.json"
+        active_calib_file = BASE_DIR / "calibration" / "calib_system_active.json"
         try:
             calib_file.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "camera_id": req.camera_id,
+                "image_width": req.image_width,
+                "image_height": req.image_height,
+                "ref_object_width_mm": actual_width_mm,
+                "ref_object_height_mm": actual_height_mm,
+                "ref_corners_px": corners_px,
+                "mm_per_pixel_x": mm_per_pixel_x,
+                "mm_per_pixel_y": mm_per_pixel_y,
+                "mm_per_pixel_avg": mm_per_pixel_avg,
+                "homography_matrix": homography_matrix,
+                "calibrated_at": datetime.utcnow().isoformat(),
+                "notes": req.notes or ""
+            }
             with open(calib_file, "w") as f:
-                json.dump({
-                    "camera_id": req.camera_id,
-                    "image_width": req.image_width,
-                    "image_height": req.image_height,
-                    "ref_object_width_mm": actual_width_mm,
-                    "ref_object_height_mm": actual_height_mm,
-                    "ref_corners_px": corners_px,
-                    "mm_per_pixel_x": mm_per_pixel_x,
-                    "mm_per_pixel_y": mm_per_pixel_y,
-                    "mm_per_pixel_avg": mm_per_pixel_avg,
-                    "homography_matrix": homography_matrix,
-                    "calibrated_at": datetime.utcnow().isoformat(),
-                    "notes": req.notes or ""
-                }, f, indent=2)
+                json.dump(payload, f, indent=2)
+            with open(active_calib_file, "w") as f:
+                json.dump(payload, f, indent=2)
         except Exception:
             pass
 
@@ -381,6 +385,47 @@ async def direct_calibration_endpoint(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/active-calibration", response_model=Optional[CameraCalibrationSchema])
+async def get_active_calibration_endpoint(db: Session = Depends(get_db)):
+    """
+    Get the currently active system-wide camera calibration.
+    Returns the calibration scale used for ore measurement across all streams and models.
+    """
+    active_calib = get_active_system_calibration()
+    if active_calib:
+        return to_calib_schema(active_calib)
+    return None
+
+
+@router.get("/system-calibration-status")
+async def get_system_calibration_status(db: Session = Depends(get_db)):
+    """
+    Returns system-wide camera calibration status, scale factors, and whether
+    initial camera calibration has been completed by the user.
+    """
+    active_calib = get_active_system_calibration()
+    if active_calib:
+        schema = to_calib_schema(active_calib)
+        return {
+            "is_calibrated": True,
+            "camera_id": active_calib.camera_id,
+            "mm_per_pixel": round(active_calib.mm_per_pixel_avg, 4),
+            "cm_per_pixel": round(active_calib.mm_per_pixel_avg / 10.0, 5),
+            "calibrated_at": active_calib.calibrated_at,
+            "notes": active_calib.notes,
+            "active_calibration": schema
+        }
+    return {
+        "is_calibrated": False,
+        "camera_id": None,
+        "mm_per_pixel": 1.25,
+        "cm_per_pixel": 0.125,
+        "calibrated_at": None,
+        "notes": "Uncalibrated - using system default fallback scale",
+        "active_calibration": None
+    }
 
 
 @router.get("/calibration/{camera_id}", response_model=CameraCalibrationSchema)

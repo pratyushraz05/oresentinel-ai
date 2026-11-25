@@ -2,15 +2,17 @@ import React from "react";
 import {
   ShieldAlert, Activity, Sliders, PlayCircle,
   Clock, LayoutDashboard, Database, BarChart3, Sparkles,
-  Camera, Ruler
+  Camera, Ruler, CheckCircle2, AlertTriangle
 } from "lucide-react";
 import type { DashboardSummary } from "../types";
+import type { SystemCalibrationStatus } from "../api";
 
 interface HeaderProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   summary: DashboardSummary | null;
   onOpenSettings: () => void;
+  systemCalibration?: SystemCalibrationStatus | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,6 +20,7 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   summary,
   onOpenSettings,
+  systemCalibration,
 }) => {
   return (
     <header className="border-b border-[#18342e] bg-[#071311]/90 backdrop-blur sticky top-0 z-50">
@@ -47,13 +50,35 @@ export const Header: React.FC<HeaderProps> = ({
             <Clock className="w-3.5 h-3.5 text-amber-400" />
             <span>AVG LEAD TIME: <strong className="text-amber-400 font-mono">{summary?.mean_lead_time_sec ?? 74.5}s</strong> (TARGET &lt;180s)</span>
           </div>
+
+          {/* Global System Calibration Status Badge */}
+          {systemCalibration?.is_calibrated ? (
+            <div
+              onClick={() => setActiveTab("measurement")}
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-emerald-950/80 border border-emerald-600/60 text-emerald-300 font-mono text-[11px] cursor-pointer hover:bg-emerald-900/80 transition-colors shadow-sm"
+              title="System-Wide Calibration Active: All ore cameras & specimens use this physical scale. Click to adjust."
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>SCALE: {systemCalibration.cm_per_pixel.toFixed(3)} cm/px ({systemCalibration.mm_per_pixel.toFixed(2)} mm/px)</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => setActiveTab("measurement")}
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-amber-950/90 border border-amber-500/80 text-amber-200 font-mono text-[11px] animate-pulse cursor-pointer hover:bg-amber-900 transition-colors shadow-sm"
+              title="Step 1 Required: Calibrate camera to establish physical mm & cm scale across the entire plant."
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="font-bold">STEP 1: CALIBRATE CAMERA</span>
+            </button>
+          )}
+
           <button
             onClick={onOpenSettings}
             className="flex items-center space-x-1 text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer"
             title="Crusher Calibration & Rules"
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>CALIBRATION</span>
+            <span>SETTINGS</span>
           </button>
         </div>
       </div>
@@ -163,14 +188,19 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={() => setActiveTab("measurement")}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer relative ${
               activeTab === "measurement"
                 ? "bg-emerald-700/60 text-emerald-200 border border-emerald-500/50"
                 : "text-slate-400 hover:text-white hover:bg-[#122823]"
             }`}
           >
             <Ruler className="w-4 h-4 text-emerald-300" />
-            <span>Measurement</span>
+            <span>Measurement &amp; Calibration</span>
+            {!systemCalibration?.is_calibrated && (
+              <span className="bg-amber-500 text-slate-950 font-black text-[9px] px-1.5 py-0.2 rounded font-mono animate-pulse">
+                STEP 1
+              </span>
+            )}
           </button>
         </nav>
       </div>

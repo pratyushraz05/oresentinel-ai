@@ -3,7 +3,7 @@ import {
   Camera, Zap, Volume2, VolumeX, ShieldAlert,
   Play, Pause, Sliders, CheckCircle2, Siren
 } from "lucide-react";
-import { sendRealtimeFrame, acknowledgeIncident, linkOutcome } from "../api";
+import { sendRealtimeFrame, acknowledgeIncident, linkOutcome, fetchSystemCalibrationStatus, type SystemCalibrationStatus } from "../api";
 import { soundAlert } from "../utils/audioAlert";
 import type { Incident, RealtimeFrameResponse, RealtimeDetectionBox } from "../types";
 
@@ -33,6 +33,18 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
   const [calibrationScale, setCalibrationScale] = useState<number>(1.2);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [showCalibrationDrawer, setShowCalibrationDrawer] = useState<boolean>(false);
+  const [systemCalib, setSystemCalib] = useState<SystemCalibrationStatus | null>(null);
+
+  // Load system-wide calibration on mount
+  useEffect(() => {
+    fetchSystemCalibrationStatus()
+      .then((calib) => {
+        if (calib && calib.is_calibrated) {
+          setSystemCalib(calib);
+        }
+      })
+      .catch((err) => console.warn("Could not fetch active system calibration for live feed:", err));
+  }, []);
 
   // Live telemetry
   const [liveFps, setLiveFps] = useState<number>(0);
@@ -195,15 +207,17 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
       ctx.lineTo(x + boxW, y + boxH - bracket);
       ctx.stroke();
 
-      // Industrial Caliber Tag
+      // Industrial Caliber Tag in Centimeters (cm) and Millimeters (mm)
+      const majorCm = (d.major_axis_mm / 10).toFixed(1);
+      const minorCm = (d.minor_axis_mm / 10).toFixed(1);
       const label = isOver
-        ? `BOULDER #${d.rock_index}: ${Math.round(d.major_axis_mm)}mm [OVERSIZE]`
+        ? `BOULDER #${d.rock_index}: ${majorCm} cm (${Math.round(d.major_axis_mm)}mm) [OVERSIZE]`
         : isWarn
-        ? `ROCK #${d.rock_index}: ${Math.round(d.major_axis_mm)}mm [NEAR-LIMIT]`
-        : `FRAGMENT #${d.rock_index}: ${Math.round(d.major_axis_mm)}mm`;
+        ? `ROCK #${d.rock_index}: ${majorCm} cm (${Math.round(d.major_axis_mm)}mm) [NEAR-LIMIT]`
+        : `FRAGMENT #${d.rock_index}: ${majorCm} cm (${Math.round(d.major_axis_mm)}mm)`;
 
       ctx.font = "bold 12px monospace";
-      const tagW = Math.max(ctx.measureText(label).width + 16, 210);
+      const tagW = Math.max(ctx.measureText(label).width + 16, 230);
       const tagH = 34;
       const tagY = Math.max(tagH + 4, y - 6);
 
@@ -222,12 +236,12 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
       ctx.font = "10px monospace";
       ctx.fillStyle = color;
       ctx.fillText(
-        `Aspect ${d.aspect_ratio} | Mass: ${Math.round(d.estimated_mass_kg)}kg | ${d.model_name.includes("YOLO") ? "YOLOv8" : "CV"}`,
+        `W:${majorCm}cm H:${minorCm}cm | Mass: ~${Math.round(d.estimated_mass_kg)}kg | ${systemCalib?.is_calibrated ? 'System Calibrated' : 'Est. Scale'}`,
         x + 8,
         tagY - 6
       );
     });
-  }, []);
+  }, [systemCalib]);
 
   // Frame processing step
   const processFrame = useCallback(async () => {
@@ -512,18 +526,20 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
             <div>
               <span className="text-slate-400">MAX CALIBER: </span>
               <span className={`font-bold ${maxCaliberMm >= throatLimitMm ? "text-rose-400 animate-pulse" : maxCaliberMm >= throatLimitMm * 0.8 ? "text-amber-400" : "text-emerald-400"}`}>
-                {Math.round(maxCaliberMm)}mm
+                {(maxCaliberMm / 10).toFixed(1)} cm <span className="text-[10px] text-slate-400 font-normal">({Math.round(maxCaliberMm)}mm)</span>
               </span>
             </div>
             <span className="text-slate-600">|</span>
             <div>
               <span className="text-slate-400">THROAT: </span>
-              <span className="text-white font-bold">{throatLimitMm}mm</span>
+              <span className="text-white font-bold">{(throatLimitMm / 10).toFixed(1)} cm</span>
             </div>
             <span className="text-slate-600">|</span>
             <div>
               <span className="text-slate-400">SCALE: </span>
-              <span className="text-teal-300 font-bold">{calibrationScale.toFixed(1)}x</span>
+              <span className="text-teal-300 font-bold">
+                {systemCalib?.is_calibrated ? `${systemCalib.cm_per_pixel.toFixed(3)} cm/px` : `${calibrationScale.toFixed(1)}x`}
+              </span>
             </div>
           </div>
 
@@ -532,7 +548,7 @@ export const LiveWebcamFeed: React.FC<LiveWebcamFeedProps> = ({
               {liveSeverity.replace("_", " ")}
             </span>
             <span className="text-slate-600">|</span>
-            <span>YOLOv8</span>
+            <span>{systemCalib?.is_calibrated ? "Calibrated Ore Sizing" : "YOLOv8"}</span>
           </div>
         </div>
 

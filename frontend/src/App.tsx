@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Ruler, Zap } from "lucide-react";
 import { Header } from "./components/Header";
 import { FlagshipDemo } from "./components/FlagshipDemo";
 import { DashboardView } from "./components/DashboardView";
@@ -12,7 +13,8 @@ import type {
   Incident, DashboardSummary, DashboardTrends, SpecimenFixture, PlantConfig
 } from "./types";
 import {
-  fetchSummary, fetchTrends, fetchIncidents, fetchFixtures, fetchPlantConfig
+  fetchSummary, fetchTrends, fetchIncidents, fetchFixtures, fetchPlantConfig,
+  fetchSystemCalibrationStatus, type SystemCalibrationStatus
 } from "./api";
 
 export function App() {
@@ -25,21 +27,27 @@ export function App() {
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [copilotQueryIncident, setCopilotQueryIncident] = useState<string>("");
+  const [systemCalibration, setSystemCalibration] = useState<SystemCalibrationStatus | null>(null);
+  const [dismissCalibBanner, setDismissCalibBanner] = useState<boolean>(false);
 
   const loadData = async () => {
     try {
-      const [sumRes, trRes, incRes, fixRes, confRes] = await Promise.all([
+      const [sumRes, trRes, incRes, fixRes, confRes, calibRes] = await Promise.all([
         fetchSummary(),
         fetchTrends(),
         fetchIncidents(),
         fetchFixtures(),
         fetchPlantConfig(),
+        fetchSystemCalibrationStatus().catch(() => null),
       ]);
       setSummary(sumRes);
       setTrends(trRes);
       setIncidents(incRes);
       setFixtures(fixRes);
       setPlantConfig(confRes);
+      if (calibRes) {
+        setSystemCalibration(calibRes);
+      }
     } catch (err) {
       console.error("Error loading plant data:", err);
     }
@@ -74,7 +82,48 @@ export function App() {
         setActiveTab={setActiveTab}
         summary={summary}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        systemCalibration={systemCalibration}
       />
+
+      {/* Step 1 Required: Calibration First Callout Banner */}
+      {!systemCalibration?.is_calibrated && !dismissCalibBanner && (
+        <div className="bg-gradient-to-r from-amber-950/90 via-[#181a0e] to-[#071311] border-b-2 border-amber-500/80 px-6 py-3 shadow-lg">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-amber-500/20 border border-amber-500/50 flex items-center justify-center shrink-0">
+                <Ruler className="w-5 h-5 text-amber-400 animate-bounce" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-white text-sm">Step 1 Required: Camera Calibration</span>
+                  <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-[10px] text-amber-300 font-mono font-bold">
+                    GLOBAL PHYSICAL SCALE
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Calibrate your camera once with a known object. The system saves this scale and applies it everywhere for measuring ore on conveyor belts, specimens, and live feeds.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+              <button
+                onClick={() => setActiveTab("measurement")}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 cursor-pointer shadow-md transition-all"
+              >
+                <Zap className="w-3.5 h-3.5 fill-current" />
+                <span>Calibrate Camera Now</span>
+              </button>
+              <button
+                onClick={() => setDismissCalibBanner(true)}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg text-xs transition-colors cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -128,7 +177,7 @@ export function App() {
         )}
 
         {activeTab === "measurement" && (
-          <MeasurementView />
+          <MeasurementView onCalibrationUpdated={loadData} />
         )}
       </main>
 

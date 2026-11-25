@@ -46,6 +46,15 @@ class CameraCalibration:
             path = CALIBRATION_DIR / f"calib_{self.camera_id}.json"
         with open(path, 'w') as f:
             json.dump(self.to_dict(), f, indent=2)
+        
+        # Also persist as system-wide active calibration for global ore measurement
+        try:
+            active_system_path = CALIBRATION_DIR / "calib_system_active.json"
+            with open(active_system_path, 'w') as f:
+                json.dump(self.to_dict(), f, indent=2)
+        except Exception:
+            pass
+
         return path
 
     @classmethod
@@ -293,9 +302,117 @@ def list_calibrations() -> List[CameraCalibration]:
     return calibs
 
 
+def get_active_system_calibration() -> Optional[CameraCalibration]:
+    """
+    Retrieves the global/active system camera calibration.
+    Enables calibration performed on one camera/reference object to be applied
+    everywhere in the system for measuring ore on conveyor belts, specimens, and live feeds.
+    """
+    # 1. Primary active system JSON
+    active_path = CALIBRATION_DIR / "calib_system_active.json"
+    if active_path.exists():
+        try:
+            with open(active_path, 'r') as f:
+                return CameraCalibration.from_dict(json.load(f))
+        except Exception:
+            pass
+
+    # 2. Measurement camera calibration
+    measure_path = CALIBRATION_DIR / "calib_CAM-WEBCAM-MEASURE.json"
+    if measure_path.exists():
+        try:
+            with open(measure_path, 'r') as f:
+                return CameraCalibration.from_dict(json.load(f))
+        except Exception:
+            pass
+
+    # 3. Newest saved calibration file in directory
+    calib_files = list(CALIBRATION_DIR.glob("calib_*.json"))
+    if calib_files:
+        calib_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        for cf in calib_files:
+            try:
+                with open(cf, 'r') as f:
+                    return CameraCalibration.from_dict(json.load(f))
+            except Exception:
+                continue
+
+    # 4. Fallback to SQLite database
+    try:
+        from .database import engine
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT camera_id, image_width, image_height, ref_object_width_mm, ref_object_height_mm, "
+                     "ref_corners_px, mm_per_pixel_x, mm_per_pixel_y, mm_per_pixel_avg, homography_matrix, "
+                     "calibrated_at, notes FROM camera_calibrations ORDER BY calibrated_at DESC LIMIT 1")
+            ).fetchone()
+            if row:
+                corners = json.loads(row[5]) if isinstance(row[5], str) else row[5]
+                homography = json.loads(row[9]) if isinstance(row[9], str) else row[9]
+                return CameraCalibration(
+                    camera_id=str(row[0]),
+                    image_width=int(row[1]),
+                    image_height=int(row[2]),
+                    ref_object_width_mm=float(row[3]),
+                    ref_object_height_mm=float(row[4]),
+                    ref_corners_px=corners,
+                    mm_per_pixel_x=float(row[6]),
+                    mm_per_pixel_y=float(row[7]),
+                    mm_per_pixel_avg=float(row[8]),
+                    homography_matrix=homography,
+                    calibrated_at=str(row[10]),
+                    notes=str(row[11] or "")
+                )
+    except Exception:
+        pass
+
+    return None
+
+
 def get_calibration(camera_id: str) -> Optional[CameraCalibration]:
-    """Get calibration for specific camera."""
-    return CameraCalibration.load(camera_id)
+    """
+    Get calibration for specific camera, or inherit the active system calibration
+    so that all ore detection models and conveyor views use calibrated dimensions.
+    """
+    # Try specific camera file first
+    calib = CameraCalibration.load(camera_id)
+    if calib is not None:
+        return calib
+
+    # Try database for specific camera
+    try:
+        from .database import engine
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT camera_id, image_width, image_height, ref_object_width_mm, ref_object_height_mm, "
+                     "ref_corners_px, mm_per_pixel_x, mm_per_pixel_y, mm_per_pixel_avg, homography_matrix, "
+                     "calibrated_at, notes FROM camera_calibrations WHERE camera_id = :cid LIMIT 1"),
+                {"cid": camera_id}
+            ).fetchone()
+            if row:
+                corners = json.loads(row[5]) if isinstance(row[5], str) else row[5]
+                homography = json.loads(row[9]) if isinstance(row[9], str) else row[9]
+                return CameraCalibration(
+                    camera_id=str(row[0]),
+                    image_width=int(row[1]),
+                    image_height=int(row[2]),
+                    ref_object_width_mm=float(row[3]),
+                    ref_object_height_mm=float(row[4]),
+                    ref_corners_px=corners,
+                    mm_per_pixel_x=float(row[6]),
+                    mm_per_pixel_y=float(row[7]),
+                    mm_per_pixel_avg=float(row[8]),
+                    homography_matrix=homography,
+                    calibrated_at=str(row[10]),
+                    notes=str(row[11] or "")
+                )
+    except Exception:
+        pass
+
+    # Inherit system active calibration
+    return get_active_system_calibration()
 
 
 if __name__ == "__main__":

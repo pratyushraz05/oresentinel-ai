@@ -280,3 +280,39 @@ export async function getCalibrationFactor(cameraId: string): Promise<{
   if (!res.ok) throw new Error("Failed to fetch calibration factor");
   return res.json();
 }
+
+export interface SystemCalibrationStatus {
+  is_calibrated: boolean;
+  camera_id: string | null;
+  mm_per_pixel: number;
+  cm_per_pixel: number;
+  calibrated_at: string | null;
+  notes?: string;
+  active_calibration: CameraCalibrationData | null;
+}
+
+export async function fetchSystemCalibrationStatus(): Promise<SystemCalibrationStatus> {
+  const res = await fetch(`${BASE_URL}/api/measurement/system-calibration-status`);
+  if (!res.ok) {
+    return {
+      is_calibrated: false,
+      camera_id: null,
+      mm_per_pixel: 1.25,
+      cm_per_pixel: 0.125,
+      calibrated_at: null,
+      active_calibration: null,
+    };
+  }
+  const data = await res.json();
+  if (data.active_calibration) {
+    data.active_calibration = normalizeCalibrationData(data.active_calibration);
+  }
+  return data;
+}
+
+export async function fetchActiveCalibration(): Promise<CameraCalibrationData | null> {
+  const res = await fetch(`${BASE_URL}/api/measurement/active-calibration`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return normalizeCalibrationData(data);
+}

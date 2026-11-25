@@ -43,7 +43,11 @@ const SAMPLE_SPECIMENS = [
   },
 ];
 
-export const MeasurementView: React.FC = () => {
+interface MeasurementViewProps {
+  onCalibrationUpdated?: () => void;
+}
+
+export const MeasurementView: React.FC<MeasurementViewProps> = ({ onCalibrationUpdated }) => {
   // Mode selection: live webcam vs sample specimen/upload
   const [activeMode, setActiveMode] = useState<"webcam" | "specimen">("webcam");
 
@@ -133,7 +137,8 @@ export const MeasurementView: React.FC = () => {
   const handleCalibrationComplete = useCallback((newCalibration: CameraCalibrationData) => {
     setCalibration(newCalibration);
     setShowCalibrationWizard(false);
-  }, []);
+    onCalibrationUpdated?.();
+  }, [onCalibrationUpdated]);
 
   // Handle direct continuous recalibration from user-drawn box and cm dimensions
   const handleDirectRecalibrate = useCallback(async (actualWidthCm: number, actualHeightCm: number) => {
@@ -153,8 +158,9 @@ export const MeasurementView: React.FC = () => {
 
     setCalibration(updatedCalib);
     setRecalibrationCount((prev) => prev + 1);
+    onCalibrationUpdated?.();
     return updatedCalib;
-  }, [customBox, currentDetection, cameraId, recalibrationCount]);
+  }, [customBox, currentDetection, cameraId, recalibrationCount, onCalibrationUpdated]);
 
   // Handle correction submit
   const handleCorrectionSubmit = useCallback(() => {

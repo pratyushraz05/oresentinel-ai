@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
 from .config import UPLOADS_DIR, FIXTURES_DIR, CONFIG, BASE_DIR
-from .calibration import get_calibration, apply_calibration, CameraCalibration
+from .calibration import get_calibration, apply_calibration, CameraCalibration, get_active_system_calibration
 
 _yolo_model = None
 
@@ -173,11 +173,13 @@ def detect_boulders_and_measure(
     calibration: Optional[CameraCalibration] = None
     if source_id:
         calibration = get_calibration(source_id)
+    if not calibration:
+        calibration = get_active_system_calibration()
 
     if calibration:
         # Use calibrated mm/pixel and homography
         mm_per_pixel = calibration.mm_per_pixel_avg
-        print(f"[CALIB] Using calibration for {source_id}: {mm_per_pixel:.4f} mm/px")
+        print(f"[CALIB] Using calibrated scale for {source_id or 'ore feed'}: {mm_per_pixel:.4f} mm/px ({(mm_per_pixel/10.0):.4f} cm/px)")
     else:
         # Fallback: assume field of view across image width spans 1600mm
         mm_per_pixel = 1600.0 / float(w)
@@ -199,7 +201,7 @@ def detect_boulders_and_measure(
     edges[:, :m_x] = 0
     edges[:, -m_x:] = 0
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     dilated = cv2.dilate(edges, kernel, iterations=1)
     closed = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, kernel, iterations=1)
     closed[:m_y, :] = 0
@@ -223,7 +225,12 @@ def detect_boulders_and_measure(
             if ix2 > ix1 and iy2 > iy1:
                 inter = (ix2 - ix1) * (iy2 - iy1)
                 union = (bbw * bbh) + (obw * obh) - inter
-                if union > 0 and (inter / union) > 0.40:
+                min_area = min(bbw * bbh, obw * obh)
+                # Containment check: prevent internal fragments of one rock from being detected as multiple objects
+                if min_area > 0 and (inter / min_area) > 0.38:
+                    return True
+                # Standard IoU check
+                if union > 0 and (inter / union) > 0.35:
                     return True
         return False
 
@@ -474,6 +481,31 @@ def detect_boulders_and_measure(
                 rock_idx += 1
                 if rock_idx > 8:
                     break
+
+    # Deduplicate contained fragment boxes so one rock is never detected as multiple pieces
+    if len(detections) > 1:
+        sorted_by_area = sorted(detections, key=lambda d: d["bbox_w"] * d["bbox_h"], reverse=True)
+        final_kept = []
+        for cand in sorted_by_area:
+            cx, cy, cw, ch = cand["bbox_x"], cand["bbox_y"], cand["bbox_w"], cand["bbox_h"]
+            is_fragment = False
+            for parent in final_kept:
+                px, py, pw, ph = parent["bbox_x"], parent["bbox_y"], parent["bbox_w"], parent["bbox_h"]
+                ix1 = max(cx, px)
+                iy1 = max(cy, py)
+                ix2 = min(cx + cw, px + pw)
+                iy2 = min(cy + ch, py + ph)
+                if ix2 > ix1 and iy2 > iy1:
+                    inter = (ix2 - ix1) * (iy2 - iy1)
+                    cand_area = cw * ch
+                    if cand_area > 0 and (inter / cand_area) > 0.38:
+                        is_fragment = True
+                        break
+            if not is_fragment:
+                final_kept.append(cand)
+        detections = final_kept
+        for i, d in enumerate(detections, 1):
+            d["rock_index"] = i
 
     # If 0 rock pieces found, draw clear belt indicator & targeting guide
     if len(detections) == 0:
@@ -784,9 +816,14 @@ def detect_frame_in_memory(
     calibration = None
     if source_id:
         calibration = get_calibration(source_id)
+    if not calibration:
+        calibration = get_active_system_calibration()
 
     if calibration:
         mm_per_pixel = calibration.mm_per_pixel_avg
+        if calibration_scale and calibration_scale != 1.0:
+            mm_per_pixel *= float(calibration_scale)
+        print(f"[CALIB] Using calibrated scale for live feed {source_id or 'webcam'}: {mm_per_pixel:.4f} mm/px ({(mm_per_pixel/10.0):.4f} cm/px)")
     else:
         # Standard conveyor width calibration (1600mm across frame width)
         mm_per_pixel = (1600.0 / float(w)) * float(calibration_scale)
@@ -805,7 +842,12 @@ def detect_frame_in_memory(
             if ix2 > ix1 and iy2 > iy1:
                 inter = (ix2 - ix1) * (iy2 - iy1)
                 union = (bbw * bbh) + (obw * obh) - inter
-                if union > 0 and (inter / union) > 0.40:
+                min_area = min(bbw * bbh, obw * obh)
+                # Containment check: prevent internal fragments of one rock from being detected as multiple objects
+                if min_area > 0 and (inter / min_area) > 0.38:
+                    return True
+                # Standard IoU check
+                if union > 0 and (inter / union) > 0.35:
                     return True
         return False
 
@@ -1011,13 +1053,52 @@ def detect_frame_in_memory(
             salient_obj = detect_full_salient_object(img, mm_per_pixel, throat_limit_mm, warning_threshold_mm)
             if salient_obj:
                 if source_id == "CAM-WEBCAM-MEASURE":
-                    # Place full salient object as primary detection for accurate whole-object sizing
-                    detections.insert(0, salient_obj)
-                    # Re-index rocks
+                    # Place full salient object as primary detection.
+                    # CRITICAL FIX: Eliminate any sub-boxes/fragments that overlap with the salient object!
+                    sbx, sby, sbw, sbh = salient_obj["bbox"]
+                    non_overlapping = []
+                    for d in detections:
+                        dbx, dby, dbw, dbh = d["bbox"]
+                        ix1 = max(sbx, dbx)
+                        iy1 = max(sby, dby)
+                        ix2 = min(sbx + sbw, dbx + dbw)
+                        iy2 = min(sby + sbh, dby + dbh)
+                        if ix2 > ix1 and iy2 > iy1:
+                            inter = (ix2 - ix1) * (iy2 - iy1)
+                            d_area = dbw * dbh
+                            if d_area > 0 and (inter / d_area) > 0.30:
+                                continue  # Suppress internal fragment
+                        non_overlapping.append(d)
+                    detections = [salient_obj] + non_overlapping
                     for i, d in enumerate(detections, 1):
                         d["rock_index"] = i
                 elif len(detections) == 0:
                     detections.append(salient_obj)
+
+    # Final global containment suppression: if any smaller box is inside a larger boulder, discard it
+    if len(detections) > 1:
+        sorted_by_area = sorted(detections, key=lambda d: d["bbox"][2] * d["bbox"][3], reverse=True)
+        final_kept = []
+        for cand in sorted_by_area:
+            cx, cy, cw, ch = cand["bbox"]
+            is_fragment = False
+            for parent in final_kept:
+                px, py, pw, ph = parent["bbox"]
+                ix1 = max(cx, px)
+                iy1 = max(cy, py)
+                ix2 = min(cx + cw, px + pw)
+                iy2 = min(cy + ch, py + ph)
+                if ix2 > ix1 and iy2 > iy1:
+                    inter = (ix2 - ix1) * (iy2 - iy1)
+                    cand_area = cw * ch
+                    if cand_area > 0 and (inter / cand_area) > 0.38:
+                        is_fragment = True
+                        break
+            if not is_fragment:
+                final_kept.append(cand)
+        detections = final_kept
+        for i, d in enumerate(detections, 1):
+            d["rock_index"] = i
 
     max_caliber = max([d["major_axis_mm"] for d in detections], default=0.0)
     has_oversize = any(d["is_oversize"] for d in detections)
