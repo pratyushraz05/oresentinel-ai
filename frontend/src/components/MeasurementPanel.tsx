@@ -47,26 +47,30 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
   }, []);
 
   // Handle correction submit
-  const handleSubmitCorrection = async (userVerified: boolean) => {
+  const handleSubmitCorrection = async (userVerified: boolean, usePredicted: boolean = false) => {
     if (!measurement || !detection) return;
 
-    const width = parseFloat(correctionWidth);
-    const height = parseFloat(correctionHeight);
+    let actualWidthMm = measurement.predictedWidthMm;
+    let actualHeightMm = measurement.predictedHeightMm;
 
-    if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
-      alert("Please enter valid dimensions");
-      return;
-    }
+    if (!usePredicted) {
+      const width = parseFloat(correctionWidth);
+      const height = parseFloat(correctionHeight);
 
-    // Convert to mm
-    let actualWidthMm = width;
-    let actualHeightMm = height;
-    if (correctionUnit === "cm") {
-      actualWidthMm = width * 10;
-      actualHeightMm = height * 10;
-    } else if (correctionUnit === "m") {
-      actualWidthMm = width * 1000;
-      actualHeightMm = height * 1000;
+      if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
+        alert("Please enter valid dimensions");
+        return;
+      }
+
+      actualWidthMm = width;
+      actualHeightMm = height;
+      if (correctionUnit === "cm") {
+        actualWidthMm = width * 10;
+        actualHeightMm = height * 10;
+      } else if (correctionUnit === "m") {
+        actualWidthMm = width * 1000;
+        actualHeightMm = height * 1000;
+      }
     }
 
     const error = calculateError(
@@ -203,14 +207,14 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
             <div className="text-2xl font-bold font-mono text-white">
               {formatMeasurement(measurement.predictedWidthMm)}
             </div>
-            <div className="text-[10px] text-slate-500">± {measurement.detection.bbox[2] * 640 * 0.1} px</div>
+            <div className="text-[10px] text-slate-500">± {Math.round((measurement.detection.bbox[2] || 0.1) * 640 * 0.1)} px</div>
           </div>
           <div className="p-3 bg-slate-900/50 rounded-lg border border-slate-700">
             <div className="text-xs text-slate-400">Height</div>
             <div className="text-2xl font-bold font-mono text-white">
               {formatMeasurement(measurement.predictedHeightMm)}
             </div>
-            <div className="text-[10px] text-slate-500">± {measurement.detection.bbox[3] * 480 * 0.1} px</div>
+            <div className="text-[10px] text-slate-500">± {Math.round((measurement.detection.bbox[3] || 0.1) * 480 * 0.1)} px</div>
           </div>
         </div>
 
@@ -243,16 +247,16 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
         <p className="text-xs text-slate-400 text-center mb-2">Is this measurement correct?</p>
         <div className="flex gap-2">
           <button
-            onClick={() => handleSubmitCorrection(true)}
+            onClick={() => handleSubmitCorrection(true, true)}
             disabled={saving}
-            className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
           >
             <CheckCircle2 className="w-4 h-4" />
             Yes, Correct
           </button>
           <button
             onClick={() => setShowCorrection(true)}
-            className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+            className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
           >
             <XCircle className="w-4 h-4" />
             No, Fix It

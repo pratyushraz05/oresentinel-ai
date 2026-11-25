@@ -51,8 +51,53 @@ class CameraCalibrationSchema(BaseModel):
     calibrated_at: datetime
     notes: Optional[str] = None
 
+    # camelCase fields for client compatibility
+    cameraId: Optional[str] = None
+    imageWidth: Optional[int] = None
+    imageHeight: Optional[int] = None
+    refObjectWidthMm: Optional[float] = None
+    refObjectHeightMm: Optional[float] = None
+    mmPerPixelX: Optional[float] = None
+    mmPerPixelY: Optional[float] = None
+    mmPerPixelAvg: Optional[float] = None
+    homographyMatrix: Optional[List[List[float]]] = None
+    calibratedAt: Optional[str] = None
+
     class Config:
         from_attributes = True
+
+
+def to_calib_schema(calib) -> CameraCalibrationSchema:
+    """Helper to ensure both snake_case and camelCase fields are populated."""
+    cal_dt = calib.calibrated_at
+    if isinstance(cal_dt, str):
+        cal_dt = datetime.fromisoformat(cal_dt.replace('Z', '+00:00'))
+    cal_iso = cal_dt.isoformat()
+
+    return CameraCalibrationSchema(
+        camera_id=calib.camera_id,
+        image_width=calib.image_width,
+        image_height=calib.image_height,
+        ref_object_width_mm=calib.ref_object_width_mm,
+        ref_object_height_mm=calib.ref_object_height_mm,
+        ref_corners_px=calib.ref_corners_px,
+        mm_per_pixel_x=calib.mm_per_pixel_x,
+        mm_per_pixel_y=calib.mm_per_pixel_y,
+        mm_per_pixel_avg=calib.mm_per_pixel_avg,
+        homography_matrix=calib.homography_matrix,
+        calibrated_at=cal_dt,
+        notes=calib.notes,
+        cameraId=calib.camera_id,
+        imageWidth=calib.image_width,
+        imageHeight=calib.image_height,
+        refObjectWidthMm=calib.ref_object_width_mm,
+        refObjectHeightMm=calib.ref_object_height_mm,
+        mmPerPixelX=calib.mm_per_pixel_x,
+        mmPerPixelY=calib.mm_per_pixel_y,
+        mmPerPixelAvg=calib.mm_per_pixel_avg,
+        homographyMatrix=calib.homography_matrix,
+        calibratedAt=cal_iso,
+    )
 
 class FeedbackRequest(BaseModel):
     measurement_id: str
@@ -164,22 +209,36 @@ async def compute_calibration_endpoint(
 
         db.commit()
 
+        calib_dict = {
+            "camera_id": calib.camera_id,
+            "image_width": calib.image_width,
+            "image_height": calib.image_height,
+            "ref_object_width_mm": calib.ref_object_width_mm,
+            "ref_object_height_mm": calib.ref_object_height_mm,
+            "ref_corners_px": calib.ref_corners_px,
+            "mm_per_pixel_x": calib.mm_per_pixel_x,
+            "mm_per_pixel_y": calib.mm_per_pixel_y,
+            "mm_per_pixel_avg": calib.mm_per_pixel_avg,
+            "homography_matrix": calib.homography_matrix,
+            "calibrated_at": calib.calibrated_at,
+            "notes": calib.notes,
+            # camelCase aliases for frontend clients
+            "cameraId": calib.camera_id,
+            "imageWidth": calib.image_width,
+            "imageHeight": calib.image_height,
+            "refObjectWidthMm": calib.ref_object_width_mm,
+            "refObjectHeightMm": calib.ref_object_height_mm,
+            "refCornersPx": calib.ref_corners_px,
+            "mmPerPixelX": calib.mm_per_pixel_x,
+            "mmPerPixelY": calib.mm_per_pixel_y,
+            "mmPerPixelAvg": calib.mm_per_pixel_avg,
+            "homographyMatrix": calib.homography_matrix,
+            "calibratedAt": calib.calibrated_at,
+        }
+
         return CalibrationResponse(
             success=True,
-            calibration={
-                "camera_id": calib.camera_id,
-                "image_width": calib.image_width,
-                "image_height": calib.image_height,
-                "ref_object_width_mm": calib.ref_object_width_mm,
-                "ref_object_height_mm": calib.ref_object_height_mm,
-                "ref_corners_px": calib.ref_corners_px,
-                "mm_per_pixel_x": calib.mm_per_pixel_x,
-                "mm_per_pixel_y": calib.mm_per_pixel_y,
-                "mm_per_pixel_avg": calib.mm_per_pixel_avg,
-                "homography_matrix": calib.homography_matrix,
-                "calibrated_at": calib.calibrated_at,
-                "notes": calib.notes
-            },
+            calibration=calib_dict,
             mmPerPixel=calib.mm_per_pixel_avg,
             message=f"Calibration saved for {camera_id}"
         )
@@ -204,36 +263,10 @@ async def get_calibration_endpoint(camera_id: str, db: Session = Depends(get_db)
         # Try loading from file system
         file_calib = get_calibration_file(camera_id)
         if file_calib:
-            return CameraCalibrationSchema(
-                camera_id=file_calib.camera_id,
-                image_width=file_calib.image_width,
-                image_height=file_calib.image_height,
-                ref_object_width_mm=file_calib.ref_object_width_mm,
-                ref_object_height_mm=file_calib.ref_object_height_mm,
-                ref_corners_px=file_calib.ref_corners_px,
-                mm_per_pixel_x=file_calib.mm_per_pixel_x,
-                mm_per_pixel_y=file_calib.mm_per_pixel_y,
-                mm_per_pixel_avg=file_calib.mm_per_pixel_avg,
-                homography_matrix=file_calib.homography_matrix,
-                calibrated_at=datetime.fromisoformat(file_calib.calibrated_at.replace('Z', '+00:00')),
-                notes=file_calib.notes
-            )
+            return to_calib_schema(file_calib)
         raise HTTPException(status_code=404, detail=f"Calibration not found for camera {camera_id}")
 
-    return CameraCalibrationSchema(
-        camera_id=calib.camera_id,
-        image_width=calib.image_width,
-        image_height=calib.image_height,
-        ref_object_width_mm=calib.ref_object_width_mm,
-        ref_object_height_mm=calib.ref_object_height_mm,
-        ref_corners_px=calib.ref_corners_px,
-        mm_per_pixel_x=calib.mm_per_pixel_x,
-        mm_per_pixel_y=calib.mm_per_pixel_y,
-        mm_per_pixel_avg=calib.mm_per_pixel_avg,
-        homography_matrix=calib.homography_matrix,
-        calibrated_at=calib.calibrated_at,
-        notes=calib.notes
-    )
+    return to_calib_schema(calib)
 
 
 @router.get("/calibrations", response_model=List[CameraCalibrationSchema])
@@ -248,35 +281,14 @@ async def list_calibrations_endpoint(db: Session = Depends(get_db)):
             data = json.load(f)
         camera_id = data.get("camera_id")
         if camera_id and not any(c.camera_id == camera_id for c in calibs):
-            file_calibs.append(CameraCalibrationSchema(
-                camera_id=data["camera_id"],
-                image_width=data["image_width"],
-                image_height=data["image_height"],
-                ref_object_width_mm=data["ref_object_width_mm"],
-                ref_object_height_mm=data["ref_object_height_mm"],
-                ref_corners_px=data["ref_corners_px"],
-                mm_per_pixel_x=data["mm_per_pixel_x"],
-                mm_per_pixel_y=data["mm_per_pixel_y"],
-                mm_per_pixel_avg=data["mm_per_pixel_avg"],
-                homography_matrix=data["homography_matrix"],
-                calibrated_at=datetime.fromisoformat(data["calibrated_at"].replace('Z', '+00:00')),
-                notes=data.get("notes")
-            ))
+            from .calibration import CameraCalibration as FileCamCalib
+            try:
+                fc = FileCamCalib.from_dict(data)
+                file_calibs.append(to_calib_schema(fc))
+            except Exception:
+                pass
 
-    db_results = [CameraCalibrationSchema(
-        camera_id=c.camera_id,
-        image_width=c.image_width,
-        image_height=c.image_height,
-        ref_object_width_mm=c.ref_object_width_mm,
-        ref_object_height_mm=c.ref_object_height_mm,
-        ref_corners_px=c.ref_corners_px,
-        mm_per_pixel_x=c.mm_per_pixel_x,
-        mm_per_pixel_y=c.mm_per_pixel_y,
-        mm_per_pixel_avg=c.mm_per_pixel_avg,
-        homography_matrix=c.homography_matrix,
-        calibrated_at=c.calibrated_at,
-        notes=c.notes
-    ) for c in calibs]
+    db_results = [to_calib_schema(c) for c in calibs]
 
     return db_results + file_calibs
 
@@ -319,21 +331,7 @@ def save_corrections(corrections: List[dict]):
 
 @router.post("/feedback", response_model=FeedbackResponse)
 async def submit_feedback(
-    measurement_id: str = Form(...),
-    camera_id: str = Form(...),
-    image_data_url: str = Form(...),
-    bbox: str = Form(...),  # JSON string [x,y,w,h]
-    predicted_width_mm: float = Form(...),
-    predicted_height_mm: float = Form(...),
-    confidence: float = Form(...),
-    calibration_scale: float = Form(...),
-    throat_limit_mm: float = Form(...),
-    actual_width_mm: float = Form(...),
-    actual_height_mm: float = Form(...),
-    user_verified: bool = Form(...),
-    detection_model: str = Form(...),
-    detection_confidence: float = Form(...),
-    timestamp: str = Form(...),
+    req: FeedbackRequest,
     db: Session = Depends(get_db)
 ):
     """
@@ -341,31 +339,29 @@ async def submit_feedback(
     Used for continuous learning and accuracy tracking.
     """
     try:
-        bbox_list = json.loads(bbox)
-
         correction = {
             "id": f"corr_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}",
-            "measurement_id": measurement_id,
-            "camera_id": camera_id,
-            "image_data_url": image_data_url,
-            "bbox": bbox_list,
-            "predicted_width_mm": predicted_width_mm,
-            "predicted_height_mm": predicted_height_mm,
-            "confidence": confidence,
-            "calibration_scale": calibration_scale,
-            "throat_limit_mm": throat_limit_mm,
-            "actual_width_mm": actual_width_mm,
-            "actual_height_mm": actual_height_mm,
-            "error_width_mm": abs(predicted_width_mm - actual_width_mm),
-            "error_height_mm": abs(predicted_height_mm - actual_height_mm),
+            "measurement_id": req.measurement_id,
+            "camera_id": req.camera_id,
+            "image_data_url": req.image_data_url,
+            "bbox": req.bbox,
+            "predicted_width_mm": req.predicted_width_mm,
+            "predicted_height_mm": req.predicted_height_mm,
+            "confidence": req.confidence,
+            "calibration_scale": req.calibration_scale,
+            "throat_limit_mm": req.throat_limit_mm,
+            "actual_width_mm": req.actual_width_mm,
+            "actual_height_mm": req.actual_height_mm,
+            "error_width_mm": abs(req.predicted_width_mm - req.actual_width_mm),
+            "error_height_mm": abs(req.predicted_height_mm - req.actual_height_mm),
             "error_percent": (
-                (abs(predicted_width_mm - actual_width_mm) + abs(predicted_height_mm - actual_height_mm)) / 2
-                / max(1.0, (actual_width_mm + actual_height_mm) / 2) * 100
+                (abs(req.predicted_width_mm - req.actual_width_mm) + abs(req.predicted_height_mm - req.actual_height_mm)) / 2
+                / max(1.0, (req.actual_width_mm + req.actual_height_mm) / 2) * 100
             ),
-            "user_verified": user_verified,
-            "detection_model": detection_model,
-            "detection_confidence": detection_confidence,
-            "timestamp": timestamp,
+            "user_verified": req.user_verified,
+            "detection_model": req.detection_model,
+            "detection_confidence": req.detection_confidence,
+            "timestamp": req.timestamp,
             "submitted_at": datetime.utcnow().isoformat()
         }
 

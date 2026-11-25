@@ -35,15 +35,23 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const cornerOrder = ["Top-Left", "Top-Right", "Bottom-Right", "Bottom-Left"];
-  const canvasScaleRef = useRef({ x: 1, y: 1 });
   // Separate canvas ref for corner selection to avoid conflict with MeasurementWebcamFeed
   const cornerCanvasRef = useRef<HTMLCanvasElement>(null);
+  const wizardVideoRef = useRef<HTMLVideoElement>(null);
 
   const refWidth = selectedObject?.widthMm || parseFloat(customWidth) || 0;
   const refHeight = selectedObject?.heightMm || parseFloat(customHeight) || 0;
   const isCustom = selectedObject?.name === "Custom";
   const canProceed = isCustom ? (refWidth > 0 && refHeight > 0) : !!selectedObject;
   const cornersComplete = corners.length === 4;
+
+  // Sync stream to wizard preview video
+  React.useEffect(() => {
+    if (step === "capture" && videoRef.current?.srcObject && wizardVideoRef.current) {
+      wizardVideoRef.current.srcObject = videoRef.current.srcObject;
+      wizardVideoRef.current.play().catch(() => {});
+    }
+  }, [step, videoRef]);
 
   // Draw captured image to corner canvas when step changes to "corners"
   React.useEffect(() => {
@@ -63,36 +71,81 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
 
   // Capture reference image (uses shared canvasRef)
   const captureReference = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    const video = videoRef.current;
+    const video = (wizardVideoRef.current && wizardVideoRef.current.readyState >= 2)
+      ? wizardVideoRef.current
+      : videoRef.current;
     const canvas = canvasRef.current;
 
-    if (video.readyState < 2) {
-      setError("Camera not ready");
+    if (!video || !canvas) {
+      setError("Camera or canvas reference not available");
       return;
     }
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    if (video.readyState < 2) {
+      setError("Camera not ready. Make sure your camera is connected and active.");
+      return;
+    }
+
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     ctx.drawImage(video, 0, 0);
 
-    // Calculate scale for corner mapping
-    const rect = canvas.getBoundingClientRect();
-    canvasScaleRef.current = {
-      x: canvas.width / rect.width,
-      y: canvas.height / rect.height,
-    };
-
     const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
     setCapturedImage(dataUrl);
     setCorners([]);
     setStep("corners");
   }, [videoRef, canvasRef]);
+
+  // Load a synthetic reference card target (for testing without camera)
+  const loadTestReferenceCard = useCallback(() => {
+    const offscreen = document.createElement("canvas");
+    offscreen.width = 1280;
+    offscreen.height = 720;
+    const ctx = offscreen.getContext("2d");
+    if (!ctx) return;
+
+    // Industrial conveyor dark background
+    ctx.fillStyle = "#111827";
+    ctx.fillRect(0, 0, 1280, 720);
+
+    // Conveyor grid guidelines
+    ctx.strokeStyle = "#1f2937";
+    ctx.lineWidth = 1;
+    for (let x = 0; x < 1280; x += 40) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 720); ctx.stroke();
+    }
+    for (let y = 0; y < 720; y += 40) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(1280, y); ctx.stroke();
+    }
+
+    // High contrast test reference card in center
+    const cardW = 356; // ~85.6mm at ~4.15 px/mm
+    const cardH = 224; // ~53.98mm
+    const cardX = (1280 - cardW) / 2;
+    const cardY = (720 - cardH) / 2;
+
+    ctx.fillStyle = "#0f766e";
+    ctx.strokeStyle = "#10b981";
+    ctx.lineWidth = 4;
+    ctx.fillRect(cardX, cardY, cardW, cardH);
+    ctx.strokeRect(cardX, cardY, cardW, cardH);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 22px monospace";
+    ctx.fillText("REFERENCE CARD: 85.6 x 53.98 mm", cardX + 20, cardY + 60);
+    ctx.font = "16px monospace";
+    ctx.fillText("Click the 4 corners in sequence", cardX + 20, cardY + 110);
+    ctx.fillText("Top-Left -> Top-Right -> Bottom-Right -> Bottom-Left", cardX + 20, cardY + 140);
+
+    const dataUrl = offscreen.toDataURL("image/jpeg", 0.95);
+    setCapturedImage(dataUrl);
+    setCorners([]);
+    setStep("corners");
+  }, []);
 
   // Handle corner clicks (uses dedicated cornerCanvasRef)
   const handleCanvasClick = useCallback(
@@ -102,8 +155,11 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
       const canvas = e.currentTarget;
       const rect = canvas.getBoundingClientRect();
 
-      const x = (e.clientX - rect.left) * canvasScaleRef.current.x;
-      const y = (e.clientY - rect.top) * canvasScaleRef.current.y;
+      const scaleX = (canvas.width || 1) / (rect.width || 1);
+      const scaleY = (canvas.height || 1) / (rect.height || 1);
+
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
 
       setCorners((prev) => [...prev, [x, y]]);
     },
@@ -338,30 +394,38 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
               <p className="text-center text-slate-300">Capture a clear photo of the reference object</p>
 
               <div className="relative aspect-video bg-black rounded-lg overflow-hidden border border-slate-700">
-                {isCameraActive && videoRef.current && (
+                {isCameraActive ? (
                   <video
-                    ref={videoRef}
+                    ref={wizardVideoRef}
                     autoPlay
                     playsInline
                     muted
                     className="w-full h-full object-cover"
                   />
-                )}
-                {!isCameraActive && (
-                  <div className="absolute inset-0 flex items-center justify-center text-slate-400">
-                    <p>Camera not active</p>
+                ) : (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 p-4 space-y-2">
+                    <Camera className="w-10 h-10 text-slate-600 mb-1" />
+                    <p className="font-semibold text-white">Live Camera Inactive</p>
+                    <p className="text-xs text-slate-500">You can still calibrate using the pre-calibrated test reference target below.</p>
                   </div>
                 )}
               </div>
 
-              <div className="flex justify-center">
+              <div className="flex flex-wrap items-center justify-center gap-3">
                 <button
                   onClick={captureReference}
                   disabled={!isCameraActive || loading}
-                  className="px-8 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold rounded-lg flex items-center gap-2 shadow-lg disabled:opacity-50 transition-all"
+                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold rounded-lg flex items-center gap-2 shadow-lg disabled:opacity-40 transition-all cursor-pointer"
                 >
                   <Camera className="w-5 h-5" />
-                  Capture Reference Photo
+                  Capture Photo from Camera
+                </button>
+
+                <button
+                  onClick={loadTestReferenceCard}
+                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-teal-300 font-medium rounded-lg text-sm flex items-center gap-2 transition-all cursor-pointer"
+                >
+                  <span>Load Sample Card Target</span>
                 </button>
               </div>
             </div>
@@ -485,11 +549,11 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
               <div className="grid grid-cols-2 gap-3 p-4 bg-slate-900/50 rounded-xl border border-slate-700 text-left">
                 <div>
                   <div className="text-xs text-slate-400">Scale (avg)</div>
-                  <div className="text-emerald-400 font-mono font-bold">{calibration.mmPerPixelAvg.toFixed(4)} mm/px</div>
+                  <div className="text-emerald-400 font-mono font-bold">{(calibration.mmPerPixelAvg ?? (calibration as any).mm_per_pixel_avg ?? 0).toFixed(4)} mm/px</div>
                 </div>
                 <div>
                   <div className="text-xs text-slate-400">Scale X / Y</div>
-                  <div className="text-teal-400 font-mono font-bold">{calibration.mmPerPixelX.toFixed(4)} / {calibration.mmPerPixelY.toFixed(4)}</div>
+                  <div className="text-teal-400 font-mono font-bold">{(calibration.mmPerPixelX ?? (calibration as any).mm_per_pixel_x ?? 0).toFixed(4)} / {(calibration.mmPerPixelY ?? (calibration as any).mm_per_pixel_y ?? 0).toFixed(4)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-slate-400">Reference</div>
@@ -497,7 +561,7 @@ export const CalibrationWizard: React.FC<CalibrationWizardProps> = ({
                 </div>
                 <div>
                   <div className="text-xs text-slate-400">Image Size</div>
-                  <div className="text-white font-mono">{calibration.imageWidth} × {calibration.imageHeight}</div>
+                  <div className="text-white font-mono">{calibration.imageWidth ?? (calibration as any).image_width ?? 1280} × {calibration.imageHeight ?? (calibration as any).image_height ?? 720}</div>
                 </div>
               </div>
 

@@ -254,43 +254,48 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
 
   return (
     <div className={`space-y-4 ${compact ? "compact-feed" : ""}`}>
-      {/* Status Banner */}
-      {!isCameraActive && (
-        <div className="p-4 bg-[#091513] border border-slate-800 rounded-xl text-center space-y-3">
-          <Camera className="w-12 h-12 mx-auto text-slate-600" />
-          <h4 className="text-white font-semibold">Camera Inactive</h4>
-          <p className="text-slate-400 text-sm">Click "Connect Camera" to start measurement</p>
-          {cameraError && (
-            <div className="p-2 bg-rose-950/40 border border-rose-800 rounded-lg text-xs text-rose-300">
-              {cameraError}
-            </div>
-          )}
-          <button
-            onClick={startCamera}
-            className="mx-auto px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-bold rounded-lg flex items-center gap-2 shadow-lg hover:from-emerald-400 hover:to-teal-500 transition-all"
-          >
-            <Zap className="w-4 h-4 fill-current" />
-            Connect Camera
-          </button>
-        </div>
-      )}
+      {/* Video Viewfinder Container */}
+      <div className={`relative rounded-2xl overflow-hidden aspect-video shadow-2xl transition-all duration-300 border-2 ${
+        isCameraActive
+          ? "border-emerald-700/60 bg-black opacity-100"
+          : "border-slate-800 bg-[#050c0b]"
+      }`}>
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className={`w-full h-full object-cover ${isCameraActive ? "block" : "hidden"}`}
+        />
 
-      {/* Video Viewfinder */}
-      {isCameraActive && (
-        <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-700/60 bg-black aspect-video shadow-2xl">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-          />
+        {/* Canvas Overlay */}
+        <canvas
+          ref={canvasRef}
+          className={`absolute inset-0 w-full h-full pointer-events-none ${isCameraActive ? "block" : "hidden"}`}
+        />
 
-          {/* Canvas Overlay */}
-          <canvas
-            ref={canvasRef}
-            className="absolute inset-0 w-full h-full pointer-events-none"
-          />
+        {/* Inactive overlay */}
+        {!isCameraActive && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-3 z-10">
+            <Camera className="w-14 h-14 text-slate-700 mx-auto" />
+            <h4 className="text-white font-semibold text-lg">Webcam Measurement Offline</h4>
+            <p className="text-slate-400 text-xs max-w-sm">
+              Click &quot;Connect Camera&quot; to begin real-time mm caliber detection and crusher clearance measurement.
+            </p>
+            {cameraError && (
+              <div className="p-2.5 bg-rose-950/50 border border-rose-800 rounded-lg text-xs text-rose-300 max-w-md">
+                {cameraError}
+              </div>
+            )}
+            <button
+              onClick={startCamera}
+              className="mt-2 px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-bold rounded-lg flex items-center gap-2 shadow-lg hover:from-emerald-400 hover:to-teal-500 transition-all cursor-pointer"
+            >
+              <Zap className="w-4 h-4 fill-current" />
+              Connect Camera
+            </button>
+          </div>
+        )}
 
           {/* Top HUD */}
           <div className="absolute top-3 inset-x-3 flex items-center justify-between pointer-events-none">
@@ -355,7 +360,6 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
             </div>
           </div>
         </div>
-      )}
 
       {/* Calibration Drawer */}
       {showCalibrationDrawer && (

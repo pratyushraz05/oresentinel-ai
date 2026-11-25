@@ -30,6 +30,8 @@ wheels/
 *.sqlite3
 backend/*.db
 backend/app/*.db
+backend/data/*.json
+backend/data/*.db
 *.log
 
 # Uploads & Media (keep directory)

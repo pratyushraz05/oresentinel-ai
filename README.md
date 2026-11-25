@@ -24,9 +24,10 @@ OreSentinel AI bridges the gap between raw computer vision boulder detection and
 ## 🏗️ System Architecture
 
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS v4 + Recharts + Lucide Icons
-- **Backend APIs**: Python 3.14 + FastAPI + Pydantic + Uvicorn
-- **Computer Vision & Calibration**: OpenCV edge detection, contour geometry, and calibrated millimeter scaling against conveyor width geometry (1400mm reference).
-- **Persistence**: SQLite / PostgreSQL via SQLAlchemy with complete 9-step immutable audit logs.
+- **Backend APIs**: Python 3.14 + FastAPI + Pydantic + Uvicorn + SQLAlchemy
+- **Computer Vision & Calibration**: Ultralytics YOLOv8 rock segmentation, OpenCV contour geometry, perspective homography matrix ($H$), and millimeter scaling against calibrated conveyor geometry (1400mm reference).
+- **Physical Measurement Engine**: Dual-mode camera measurement suite supporting live webcam streams and pre-calibrated ore specimens with reference target calibration.
+- **Persistence**: SQLite database with 9-step immutable audit logs and client IndexedDB ground-truth feedback store.
 - **AI Domain Copilot**: Stored-record grounded assistant with citation verification and actionable plant recommendations.
 
 ---
@@ -39,20 +40,22 @@ OreSentinel AI bridges the gap between raw computer vision boulder detection and
 
 ### 2. Run the Full Stack Application
 
-#### Option A: Run Backend & Frontend Together (Production Mode)
-The frontend build is pre-compiled into `frontend/dist` and directly served by FastAPI at `http://localhost:8000`:
+#### Option A: Run Unified Server (Production Mode &mdash; Recommended)
+The React frontend build is pre-compiled into `frontend/dist` and directly served by FastAPI on port `8080`:
 ```bash
 # In project root:
 python run_app.py
 ```
-Then open your browser to **http://localhost:8000**.
+Then open your browser to **http://localhost:8080**.
+
+*(Note: If you wish to use a custom port, set the `PORT` environment variable, e.g. `$env:PORT=8000; python run_app.py`)*
 
 #### Option B: Developer Mode (Hot Reloading)
 
 **Terminal 1 (Backend API):**
 ```bash
 cd backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8080 --reload
 ```
 
 **Terminal 2 (Frontend Dev Server):**
@@ -60,7 +63,44 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 cd frontend
 npm run dev
 ```
-Then open your browser to **http://localhost:5173**.
+Then open your browser to **http://localhost:5173** (proxies `/api` and `/media` to backend on port 8080).
+
+---
+
+## 📐 Physical Measurement & Camera Calibration (Measurement Tab)
+
+OreSentinel AI includes a dedicated **Physical Measurement** module designed to evaluate rock caliber against primary crusher throat limits in real time with sub-centimeter millimeter precision.
+
+### 1. Two Operational Modes
+Inside the **Measurement** tab in the navigation bar:
+- **📹 Live Webcam Stream**:
+  - Connects directly to your laptop or external USB/industrial camera.
+  - Displays real-time reticle crosshairs and bounding box calipers at ~5 FPS inference rate.
+  - Automatically classifies detected objects as **NORMAL**, **NEAR LIMIT** (≥80% throat limit), or **OVERSIZE** (exceeding 800mm crusher throat limit).
+- **🖼️ Sample Specimen / Photo Upload**:
+  - Allows instant measurement testing without requiring an active physical webcam or stone.
+  - Includes 4 pre-calibrated iron ore specimens:
+    1. *Critical 1120mm Boulder* (throat limit exceeded by 40%)
+    2. *Elongated 940mm Bridging Slab* (2.4:1 aspect ratio wedging risk)
+    3. *Uniform 420mm Feed* (safe fragmented ore pass)
+    4. *Cluster Near-Limit Jam* (dual rocks choke hazard)
+  - Supports uploading custom high-resolution quarry, conveyor, or muckpile photographs.
+
+### 2. Camera Calibration Wizard
+To achieve true perspective-corrected millimeter accuracy regardless of camera lens angle or distance:
+1. Click the **"Calibrate Camera"** button in the Measurement tab.
+2. **Select Reference Object**: Choose a known reference target (Standard Credit/Debit Card ISO 7810: 85.6 × 53.98mm, A4 Paper: 210 × 297mm, iPhone 15 Pro, 100mm ArUco marker, or enter custom dimensions).
+3. **Capture Reference Photo**: Capture a frame from your live camera or click **"Load Sample Card Target"** to evaluate the wizard instantly.
+4. **Mark 4 Corners**: Click the corners in sequence (*Top-Left &rarr; Top-Right &rarr; Bottom-Right &rarr; Bottom-Left*).
+5. **Compute Homography**: The backend computes the 3×3 perspective transformation matrix ($H$) and millimeter-per-pixel scale factor ($mm/\text{px}$) and saves it to the database (`CAM-WEBCAM-MEASURE`).
+6. Future measurements automatically apply homography transformation:
+   $$\begin{bmatrix} x_{mm} \\ y_{mm} \\ 1 \end{bmatrix} \sim H \begin{bmatrix} x_{px} \\ y_{px} \\ 1 \end{bmatrix}$$
+
+### 3. Continuous Learning & Feedback Loop
+- **Verify Measurements**: Operators can confirm predicted millimeter caliber with one click (**"Yes, Correct"**), which marks the record as verified.
+- **Submit Ground-Truth Corrections**: If actual dimensions differ, click **"No, Fix It"** and input verified physical calliper/tape measurements.
+- **Accuracy Tracking**: View real-time **Mean Absolute Error (MAE)** in mm and **Mean Absolute Percentage Error (MAPE)**.
+- **Export Training Data**: Export verified corrections in JSON format or YOLO format (`images` + normalized `.txt` labels) for model fine-tuning.
 
 ---
 
@@ -69,15 +109,14 @@ Then open your browser to **http://localhost:5173**.
 OreSentinel AI supports your laptop camera in two ways:
 
 ### Option 1: Live in Web Browser (Recommended & Instant)
-1. Start the app: `python run_app.py` and open **http://localhost:8000**.
-2. Go to the **9-Step Journey** tab.
-3. Under the *01 Capture & 02 Validate* card, click the **"Laptop Cam"** tab.
-4. Allow your browser camera permission when prompted.
-5. You will see a live video feed with an industrial HUD viewfinder and target crosshairs!
-6. Hold any physical object (or stone/rock) in front of the camera, and click **"📸 Snap Webcam Frame & Run 9-Step Pipeline"**.
-7. The system instantly detects the object, segments its contour, estimates major/minor caliber in millimeters, assesses crusher throat risk, logs an incident alert, and tracks operator response!
-
-You can also view your live laptop camera inside the **Operations Dashboard** by selecting the **"💻 WEBCAM"** button in the camera feed switcher.
+1. Start the app: `python run_app.py` and open **http://localhost:8080**.
+2. **For 9-Step Journey**:
+   - Go to the **9-Step Journey** tab.
+   - Under the *01 Capture & 02 Validate* card, click the **"Laptop Cam"** tab.
+   - Click **"📸 Snap Webcam Frame & Run 9-Step Pipeline"** to trace a single frame through the complete 9-step operational journey.
+3. **For Continuous Live Stream**:
+   - Go to the **Operations Dashboard** and click **"💻 WEBCAM"** in the camera feed selector.
+   - Or open the **Measurement** tab for dedicated millimeter sizing and reticle tracking.
 
 ### Option 2: Standalone OpenCV Desktop Stream
 If you want to run high-FPS desktop edge detection directly via Python OpenCV:
@@ -92,10 +131,10 @@ python webcam_feed.py
 
 ## 🧪 Vertical Slice Flagship Demonstration
 
-The application comes with 4 pre-calibrated ore specimens for instant demonstration:
-1. **Critical 1120mm Oversize Boulder**: Exceeds primary jaw throat limit (800mm) by 40%.
+The application comes with 4 pre-calibrated ore specimens for instant demonstration across all tabs:
+1. **Critical 1120mm Oversize Boulder**: Exceeds primary jaw throat limit (800mm) by 40%. Requires chute diversion.
 2. **Elongated 940mm Bridging Slab**: Aspect ratio 2.4:1 prone to wedging across crusher cavity.
-3. **Uniform Run-of-Mine Feed (380-480mm)**: Standard fragmented ore passing safely.
+3. **Uniform Run-of-Mine Feed (380-480mm)**: Standard fragmented ore passing safely through hopper.
 4. **Cluster Feed (Dual Near-Limit Rocks)**: Simultaneous arrival choke hazard.
 
 You can also upload your own rock / conveyor inspection photographs directly in the UI.
@@ -135,7 +174,7 @@ Weights are automatically exported to `backend/ml/weights/oresentinel_yolo.pt` a
 
 ### 4. Hybrid Vision & Physical Caliber Scaling
 1. **YOLOv8 Object Detection**: Extracts bounding boxes, classification, and confidence.
-2. **Conveyor Calibration**: Transforms pixel bounding boxes into physical millimeters ($1600\,\text{mm}$ reference field of view, $1400\,\text{mm}$ belt width).
+2. **Conveyor & Camera Calibration**: Transforms pixel bounding boxes into physical millimeters using either the calibrated conveyor belt geometry (1400mm width) or the active camera homography matrix.
 3. **Contour Geometry & Ellipsoid Volume**: Calculates major/minor axes, aspect ratio, estimated volume ($\text{dm}^3$), and ore mass ($\text{kg}$ based on hematite density $\sim 3100\,\text{kg/m}^3$).
 4. **Resilient Fallback**: If lighting or dust prevents high-confidence YOLO detections, the system automatically falls back to ISO/IEC 15415-calibrated OpenCV edge segmentation.
 

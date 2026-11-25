@@ -68,11 +68,17 @@ export function measureWithHomography(
   ];
 
   // Apply homography transformation
-  const H = calibration.homographyMatrix;
+  const H = calibration.homographyMatrix || (calibration as any).homography_matrix;
+  if (!H || H.length < 3 || !H[0] || H[0].length < 3) {
+    const mmPx = (calibration.mmPerPixelAvg ?? (calibration as any).mm_per_pixel_avg) || 1.0;
+    const widthMm = Math.round(w * mmPx * 10) / 10;
+    const heightMm = Math.round(h * mmPx * 10) / 10;
+    return { widthMm, heightMm, majorAxisMm: Math.max(widthMm, heightMm), minorAxisMm: Math.min(widthMm, heightMm) };
+  }
   const cornersMm = cornersPx.map(([px, py]) => {
     const x = H[0][0] * px + H[0][1] * py + H[0][2];
     const y = H[1][0] * px + H[1][1] * py + H[1][2];
-    const w = H[2][0] * px + H[2][1] * py + H[2][2];
+    const w = H[2][0] * px + H[2][1] * py + H[2][2] || 1.0;
     return [x / w, y / w];
   });
 
@@ -86,8 +92,10 @@ export function measureWithHomography(
     distance(cornersMm[1], cornersMm[2]),
   ];
 
-  const widthMm = (widths[0] + widths[1]) / 2;
-  const heightMm = (heights[0] + heights[1]) / 2;
+  const rawWidthMm = (widths[0] + widths[1]) / 2;
+  const rawHeightMm = (heights[0] + heights[1]) / 2;
+  const widthMm = Number.isFinite(rawWidthMm) ? Math.round(rawWidthMm * 10) / 10 : 0;
+  const heightMm = Number.isFinite(rawHeightMm) ? Math.round(rawHeightMm * 10) / 10 : 0;
   const majorAxisMm = Math.max(widthMm, heightMm);
   const minorAxisMm = Math.min(widthMm, heightMm);
 
@@ -101,20 +109,23 @@ export function measureWithScale(
   detection: RealtimeDetectionBox,
   config: MeasurementConfig
 ): { widthMm: number; heightMm: number; majorAxisMm: number; minorAxisMm: number } {
-  const { calibrationScale, calibration, imageWidth, imageHeight } = config;
+  const { calibrationScale = 1.0, calibration, imageWidth = 1280, imageHeight = 720 } = config;
 
   // Use calibrated mm_per_pixel if available, otherwise fallback
   let mmPerPixel: number;
-  if (calibration) {
-    mmPerPixel = calibration.mmPerPixelAvg;
+  const avg = calibration?.mmPerPixelAvg ?? (calibration as any)?.mm_per_pixel_avg;
+  if (typeof avg === "number" && !isNaN(avg) && avg > 0) {
+    mmPerPixel = avg;
   } else {
     // Fallback: assume conveyor width spans image width
-    mmPerPixel = 1600 / imageWidth * calibrationScale;
+    mmPerPixel = (1600 / (imageWidth || 1280)) * (calibrationScale || 1.0);
   }
 
   const { w, h } = denormalizeBbox(detection.bbox, imageWidth, imageHeight);
-  const widthMm = w * mmPerPixel;
-  const heightMm = h * mmPerPixel;
+  const rawWidthMm = w * mmPerPixel;
+  const rawHeightMm = h * mmPerPixel;
+  const widthMm = Number.isFinite(rawWidthMm) ? Math.round(rawWidthMm * 10) / 10 : 0;
+  const heightMm = Number.isFinite(rawHeightMm) ? Math.round(rawHeightMm * 10) / 10 : 0;
   const majorAxisMm = Math.max(widthMm, heightMm);
   const minorAxisMm = Math.min(widthMm, heightMm);
 
@@ -132,7 +143,8 @@ export function measureObject(
 
   let measurement: { widthMm: number; heightMm: number; majorAxisMm: number; minorAxisMm: number };
 
-  if (isCalibrated && config.calibration!.homographyMatrix) {
+  const H = config.calibration?.homographyMatrix || (config.calibration as any)?.homography_matrix;
+  if (isCalibrated && H && H.length >= 3) {
     measurement = measureWithHomography(detection.bbox, config.calibration!, config.imageWidth, config.imageHeight);
   } else {
     measurement = measureWithScale(detection, config);
@@ -215,13 +227,14 @@ function distance(a: number[], b: number[]): number {
  * Format measurement for display
  */
 export function formatMeasurement(mm: number, unit: "mm" | "cm" | "m" = "mm"): string {
+  const val = Number.isFinite(mm) && !isNaN(mm) ? mm : 0;
   switch (unit) {
     case "cm":
-      return `${(mm / 10).toFixed(1)} cm`;
+      return `${(val / 10).toFixed(1)} cm`;
     case "m":
-      return `${(mm / 1000).toFixed(3)} m`;
+      return `${(val / 1000).toFixed(3)} m`;
     default:
-      return `${mm.toFixed(1)} mm`;
+      return `${val.toFixed(1)} mm`;
   }
 }
 

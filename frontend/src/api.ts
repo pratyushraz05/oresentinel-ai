@@ -161,12 +161,29 @@ export async function sendRealtimeFrame(
 }
 
 // ===== Measurement API =====
+export function normalizeCalibrationData(raw: any): CameraCalibrationData | null {
+  if (!raw) return null;
+  return {
+    cameraId: raw.cameraId || raw.camera_id || "CAM-WEBCAM-MEASURE",
+    mmPerPixelX: Number(raw.mmPerPixelX ?? raw.mm_per_pixel_x ?? 1.0),
+    mmPerPixelY: Number(raw.mmPerPixelY ?? raw.mm_per_pixel_y ?? 1.0),
+    mmPerPixelAvg: Number(raw.mmPerPixelAvg ?? raw.mm_per_pixel_avg ?? 1.0),
+    homographyMatrix: raw.homographyMatrix || raw.homography_matrix || [],
+    refObjectWidthMm: Number(raw.refObjectWidthMm ?? raw.ref_object_width_mm ?? 85.6),
+    refObjectHeightMm: Number(raw.refObjectHeightMm ?? raw.ref_object_height_mm ?? 53.98),
+    calibratedAt: raw.calibratedAt || (typeof raw.calibrated_at === 'string' ? raw.calibrated_at : new Date().toISOString()),
+    imageWidth: Number(raw.imageWidth ?? raw.image_width ?? 1280),
+    imageHeight: Number(raw.imageHeight ?? raw.image_height ?? 720),
+  };
+}
+
 export async function fetchCalibration(cameraId: string): Promise<CameraCalibrationData | null> {
   try {
     const res = await fetch(`${BASE_URL}/api/measurement/calibration/${cameraId}`);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error("Failed to fetch calibration");
-    return res.json();
+    const data = await res.json();
+    return normalizeCalibrationData(data);
   } catch {
     return null;
   }
@@ -191,7 +208,11 @@ export async function computeCalibration(
     body: formData,
   });
   if (!res.ok) throw new Error("Failed to compute calibration");
-  return res.json();
+  const data = await res.json();
+  if (data.calibration) {
+    data.calibration = normalizeCalibrationData(data.calibration);
+  }
+  return data;
 }
 
 export async function submitFeedback(request: FeedbackRequest): Promise<FeedbackResponse> {
