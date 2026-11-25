@@ -59,6 +59,8 @@ export const MeasurementView: React.FC<MeasurementViewProps> = ({ onCalibrationU
   // Camera state
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [objectDistanceCm, setObjectDistanceCm] = useState<number>(50.0);
+  const [hasConfirmedDistance, setHasConfirmedDistance] = useState<boolean>(false);
 
   // Calibration state
   const [calibration, setCalibration] = useState<CameraCalibrationData | null>(null);
@@ -141,26 +143,35 @@ export const MeasurementView: React.FC<MeasurementViewProps> = ({ onCalibrationU
   }, [onCalibrationUpdated]);
 
   // Handle direct continuous recalibration from user-drawn box and cm dimensions
-  const handleDirectRecalibrate = useCallback(async (actualWidthCm: number, actualHeightCm: number) => {
+  const handleDirectRecalibrate = useCallback(async (actualWidthCm: number, actualHeightCm: number, distanceCm?: number) => {
     const box = customBox || (currentDetection ? currentDetection.bbox : [0.25, 0.25, 0.5, 0.5]);
     const imgW = videoRef.current?.videoWidth || 1280;
     const imgH = videoRef.current?.videoHeight || 720;
+    const distCm = distanceCm || objectDistanceCm || 50.0;
 
     const updatedCalib = await directRecalibrate({
       camera_id: cameraId,
       box: box as [number, number, number, number],
       actual_width_cm: actualWidthCm,
       actual_height_cm: actualHeightCm,
+      distance_cm: distCm,
       image_width: imgW,
       image_height: imgH,
-      notes: `User iteration #${recalibrationCount + 1}: ${actualWidthCm}x${actualHeightCm}cm`,
+      notes: `User iteration #${recalibrationCount + 1}: ${actualWidthCm}x${actualHeightCm}cm at ${distCm}cm`,
     });
 
     setCalibration(updatedCalib);
     setRecalibrationCount((prev) => prev + 1);
     onCalibrationUpdated?.();
     return updatedCalib;
-  }, [customBox, currentDetection, cameraId, recalibrationCount, onCalibrationUpdated]);
+  }, [customBox, currentDetection, cameraId, objectDistanceCm, recalibrationCount, onCalibrationUpdated]);
+
+  const handleMeasureNextObject = useCallback(() => {
+    setCurrentDetection(null);
+    setCurrentMeasurement(null);
+    setCustomBox(null);
+    setIsAdjustingBox(false);
+  }, []);
 
   // Handle correction submit
   const handleCorrectionSubmit = useCallback(() => {
@@ -317,6 +328,7 @@ export const MeasurementView: React.FC<MeasurementViewProps> = ({ onCalibrationU
         await videoRef.current.play();
         setIsCameraActive(true);
         setIsProcessingLoop(true);
+        setHasConfirmedDistance(false);
       }
     } catch (err: any) {
       setCameraError(err.message || "Could not access webcam. Check browser permissions.");
@@ -448,6 +460,10 @@ export const MeasurementView: React.FC<MeasurementViewProps> = ({ onCalibrationU
                 customBox={customBox}
                 setCustomBox={setCustomBox}
                 calibMmPerPx={Number(calibMmPerPx)}
+                objectDistanceCm={objectDistanceCm}
+                setObjectDistanceCm={setObjectDistanceCm}
+                hasConfirmedDistance={hasConfirmedDistance}
+                setHasConfirmedDistance={setHasConfirmedDistance}
               />
 
               {/* Measurement Target Guide */}
@@ -581,6 +597,9 @@ export const MeasurementView: React.FC<MeasurementViewProps> = ({ onCalibrationU
             onDirectRecalibrate={handleDirectRecalibrate}
             recalibrationCount={recalibrationCount}
             calibMmPerPx={Number(calibMmPerPx)}
+            objectDistanceCm={objectDistanceCm}
+            setObjectDistanceCm={setObjectDistanceCm}
+            onMeasureNextObject={handleMeasureNextObject}
           />
         </div>
       </div>

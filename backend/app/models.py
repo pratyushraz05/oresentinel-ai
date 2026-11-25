@@ -130,3 +130,5 @@ class CameraCalibration(Base):
     homography_matrix = Column(JSON, nullable=False)  # 3x3 matrix
     calibrated_at = Column(DateTime, default=datetime.utcnow)
     notes = Column(Text, nullable=True)
+    distance_cm = Column(Float, nullable=True, default=50.0)
+    focal_length_px = Column(Float, nullable=True, default=1000.0)

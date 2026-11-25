@@ -135,6 +135,7 @@ export async function sendRealtimeFrame(
     throatLimitMm?: number;
     autoCreateIncident?: boolean;
     sourceId?: string;
+    distanceCm?: number;
   }
 ): Promise<RealtimeFrameResponse> {
   const formData = new FormData();
@@ -150,6 +151,9 @@ export async function sendRealtimeFrame(
   }
   if (params.sourceId) {
     formData.append("source_id", params.sourceId);
+  }
+  if (params.distanceCm !== undefined && params.distanceCm > 0) {
+    formData.append("distance_cm", params.distanceCm.toString());
   }
 
   const res = await fetch(`${BASE_URL}/api/vision/realtime-frame`, {
@@ -174,6 +178,8 @@ export function normalizeCalibrationData(raw: any): CameraCalibrationData | null
     calibratedAt: raw.calibratedAt || (typeof raw.calibrated_at === 'string' ? raw.calibrated_at : new Date().toISOString()),
     imageWidth: Number(raw.imageWidth ?? raw.image_width ?? 1280),
     imageHeight: Number(raw.imageHeight ?? raw.image_height ?? 720),
+    distanceCm: Number(raw.distanceCm ?? raw.distance_cm ?? 50.0),
+    focalLengthPx: Number(raw.focalLengthPx ?? raw.focal_length_px ?? 1000.0),
   };
 }
 
@@ -286,6 +292,8 @@ export interface SystemCalibrationStatus {
   camera_id: string | null;
   mm_per_pixel: number;
   cm_per_pixel: number;
+  distance_cm?: number;
+  focal_length_px?: number;
   calibrated_at: string | null;
   notes?: string;
   active_calibration: CameraCalibrationData | null;

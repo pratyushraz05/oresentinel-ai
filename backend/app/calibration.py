@@ -33,13 +33,36 @@ class CameraCalibration:
     homography_matrix: List[List[float]]  # 3x3 perspective transform
     calibrated_at: str
     notes: str = ""
+    distance_cm: float = 50.0  # Camera to object distance in cm
+    focal_length_px: float = 1000.0  # Pinhole focal length in pixels
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> 'CameraCalibration':
-        return cls(**data)
+        d = dict(data)
+        d.setdefault("distance_cm", 50.0)
+        dist_mm = float(d.get("distance_cm", 50.0)) * 10.0
+        avg_scale = max(0.001, float(d.get("mm_per_pixel_avg", 1.0)))
+        d.setdefault("focal_length_px", dist_mm / avg_scale)
+        valid_keys = {
+            "camera_id", "image_width", "image_height", "ref_object_width_mm",
+            "ref_object_height_mm", "ref_corners_px", "mm_per_pixel_x",
+            "mm_per_pixel_y", "mm_per_pixel_avg", "homography_matrix",
+            "calibrated_at", "notes", "distance_cm", "focal_length_px"
+        }
+        filtered = {k: v for k, v in d.items() if k in valid_keys}
+        return cls(**filtered)
+
+    def scale_at_distance(self, current_distance_cm: float) -> float:
+        """
+        Pinhole geometry: mm_per_pixel = (distance_mm) / focal_length_px
+        Allows dynamic continuous scaling as camera distance changes.
+        """
+        if current_distance_cm <= 0:
+            return self.mm_per_pixel_avg
+        return (float(current_distance_cm) * 10.0) / max(1.0, float(self.focal_length_px))
 
     def save(self, path: Optional[Path] = None) -> Path:
         if path is None:
@@ -72,7 +95,8 @@ def compute_calibration(
     camera_id: str,
     ref_width_mm: float = 200.0,
     ref_height_mm: float = 200.0,
-    corners_px: Optional[List[List[float]]] = None
+    corners_px: Optional[List[List[float]]] = None,
+    distance_cm: float = 50.0
 ) -> CameraCalibration:
     """
     Compute calibration from reference object corners.
@@ -122,6 +146,7 @@ def compute_calibration(
     mm_per_px_avg = (mm_per_px_x + mm_per_px_y) / 2.0
 
     from datetime import datetime
+    focal_length_px = (float(distance_cm) * 10.0) / max(0.001, float(mm_per_px_avg))
     calib = CameraCalibration(
         camera_id=camera_id,
         image_width=w,
@@ -134,7 +159,9 @@ def compute_calibration(
         mm_per_pixel_avg=float(mm_per_px_avg),
         homography_matrix=H.tolist(),
         calibrated_at=datetime.utcnow().isoformat(),
-        notes=f"Ref object: {ref_width_mm}x{ref_height_mm}mm"
+        notes=f"Ref object: {ref_width_mm}x{ref_height_mm}mm at {distance_cm}cm",
+        distance_cm=float(distance_cm),
+        focal_length_px=float(focal_length_px)
     )
 
     calib.save()
@@ -350,20 +377,20 @@ def get_active_system_calibration() -> Optional[CameraCalibration]:
             if row:
                 corners = json.loads(row[5]) if isinstance(row[5], str) else row[5]
                 homography = json.loads(row[9]) if isinstance(row[9], str) else row[9]
-                return CameraCalibration(
-                    camera_id=str(row[0]),
-                    image_width=int(row[1]),
-                    image_height=int(row[2]),
-                    ref_object_width_mm=float(row[3]),
-                    ref_object_height_mm=float(row[4]),
-                    ref_corners_px=corners,
-                    mm_per_pixel_x=float(row[6]),
-                    mm_per_pixel_y=float(row[7]),
-                    mm_per_pixel_avg=float(row[8]),
-                    homography_matrix=homography,
-                    calibrated_at=str(row[10]),
-                    notes=str(row[11] or "")
-                )
+                return CameraCalibration.from_dict({
+                    "camera_id": str(row[0]),
+                    "image_width": int(row[1]),
+                    "image_height": int(row[2]),
+                    "ref_object_width_mm": float(row[3]),
+                    "ref_object_height_mm": float(row[4]),
+                    "ref_corners_px": corners,
+                    "mm_per_pixel_x": float(row[6]),
+                    "mm_per_pixel_y": float(row[7]),
+                    "mm_per_pixel_avg": float(row[8]),
+                    "homography_matrix": homography,
+                    "calibrated_at": str(row[10]),
+                    "notes": str(row[11] or "")
+                })
     except Exception:
         pass
 
@@ -394,20 +421,20 @@ def get_calibration(camera_id: str) -> Optional[CameraCalibration]:
             if row:
                 corners = json.loads(row[5]) if isinstance(row[5], str) else row[5]
                 homography = json.loads(row[9]) if isinstance(row[9], str) else row[9]
-                return CameraCalibration(
-                    camera_id=str(row[0]),
-                    image_width=int(row[1]),
-                    image_height=int(row[2]),
-                    ref_object_width_mm=float(row[3]),
-                    ref_object_height_mm=float(row[4]),
-                    ref_corners_px=corners,
-                    mm_per_pixel_x=float(row[6]),
-                    mm_per_pixel_y=float(row[7]),
-                    mm_per_pixel_avg=float(row[8]),
-                    homography_matrix=homography,
-                    calibrated_at=str(row[10]),
-                    notes=str(row[11] or "")
-                )
+                return CameraCalibration.from_dict({
+                    "camera_id": str(row[0]),
+                    "image_width": int(row[1]),
+                    "image_height": int(row[2]),
+                    "ref_object_width_mm": float(row[3]),
+                    "ref_object_height_mm": float(row[4]),
+                    "ref_corners_px": corners,
+                    "mm_per_pixel_x": float(row[6]),
+                    "mm_per_pixel_y": float(row[7]),
+                    "mm_per_pixel_avg": float(row[8]),
+                    "homography_matrix": homography,
+                    "calibrated_at": str(row[10]),
+                    "notes": str(row[11] or "")
+                })
     except Exception:
         pass
 

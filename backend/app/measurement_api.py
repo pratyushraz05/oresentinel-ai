@@ -36,6 +36,7 @@ class DirectCalibrationRequest(BaseModel):
     box: List[float]  # [x, y, w, h] normalized or pixel coordinates
     actual_width_cm: float
     actual_height_cm: float
+    distance_cm: float = 50.0  # Camera to object distance in cm
     image_width: int = 1280
     image_height: int = 720
     notes: Optional[str] = "Interactive user rectangle calibration"
@@ -59,6 +60,8 @@ class CameraCalibrationSchema(BaseModel):
     homography_matrix: List[List[float]]
     calibrated_at: datetime
     notes: Optional[str] = None
+    distance_cm: Optional[float] = 50.0
+    focal_length_px: Optional[float] = 1000.0
 
     # camelCase fields for client compatibility
     cameraId: Optional[str] = None
@@ -71,6 +74,8 @@ class CameraCalibrationSchema(BaseModel):
     mmPerPixelAvg: Optional[float] = None
     homographyMatrix: Optional[List[List[float]]] = None
     calibratedAt: Optional[str] = None
+    distanceCm: Optional[float] = 50.0
+    focalLengthPx: Optional[float] = 1000.0
 
     class Config:
         from_attributes = True
@@ -82,6 +87,9 @@ def to_calib_schema(calib) -> CameraCalibrationSchema:
     if isinstance(cal_dt, str):
         cal_dt = datetime.fromisoformat(cal_dt.replace('Z', '+00:00'))
     cal_iso = cal_dt.isoformat()
+
+    dist_cm = float(getattr(calib, "distance_cm", 50.0) or 50.0)
+    f_px = float(getattr(calib, "focal_length_px", (dist_cm * 10.0) / max(0.001, calib.mm_per_pixel_avg)) or 1000.0)
 
     return CameraCalibrationSchema(
         camera_id=calib.camera_id,
@@ -96,6 +104,8 @@ def to_calib_schema(calib) -> CameraCalibrationSchema:
         homography_matrix=calib.homography_matrix,
         calibrated_at=cal_dt,
         notes=calib.notes,
+        distance_cm=dist_cm,
+        focal_length_px=f_px,
         cameraId=calib.camera_id,
         imageWidth=calib.image_width,
         imageHeight=calib.image_height,
@@ -106,6 +116,8 @@ def to_calib_schema(calib) -> CameraCalibrationSchema:
         mmPerPixelAvg=calib.mm_per_pixel_avg,
         homographyMatrix=calib.homography_matrix,
         calibratedAt=cal_iso,
+        distanceCm=dist_cm,
+        focalLengthPx=f_px,
     )
 
 class FeedbackRequest(BaseModel):
@@ -287,6 +299,10 @@ async def direct_calibration_endpoint(
         mm_per_pixel_y = actual_height_mm / h_px
         mm_per_pixel_avg = (mm_per_pixel_x + mm_per_pixel_y) / 2.0
 
+        dist_cm = max(5.0, float(getattr(req, "distance_cm", 50.0) or 50.0))
+        dist_mm = dist_cm * 10.0
+        focal_length_px = dist_mm / max(0.001, mm_per_pixel_avg)
+
         corners_px = [
             [x_px, y_px],
             [x_px + w_px, y_px],
@@ -329,7 +345,9 @@ async def direct_calibration_endpoint(
             mm_per_pixel_avg=mm_per_pixel_avg,
             homography_matrix=homography_matrix,
             calibrated_at=datetime.utcnow(),
-            notes=req.notes or f"Recalibrated: {req.actual_width_cm}x{req.actual_height_cm}cm"
+            notes=req.notes or f"Recalibrated: {req.actual_width_cm}x{req.actual_height_cm}cm at {dist_cm}cm",
+            distance_cm=dist_cm,
+            focal_length_px=focal_length_px
         )
 
         existing = db.query(CameraCalibration).filter(
@@ -348,6 +366,10 @@ async def direct_calibration_endpoint(
             existing.homography_matrix = calib_obj.homography_matrix
             existing.calibrated_at = calib_obj.calibrated_at
             existing.notes = calib_obj.notes
+            if hasattr(existing, "distance_cm"):
+                existing.distance_cm = dist_cm
+            if hasattr(existing, "focal_length_px"):
+                existing.focal_length_px = focal_length_px
             calib_saved = existing
         else:
             db.add(calib_obj)
@@ -372,7 +394,9 @@ async def direct_calibration_endpoint(
                 "mm_per_pixel_avg": mm_per_pixel_avg,
                 "homography_matrix": homography_matrix,
                 "calibrated_at": datetime.utcnow().isoformat(),
-                "notes": req.notes or ""
+                "notes": req.notes or "",
+                "distance_cm": dist_cm,
+                "focal_length_px": focal_length_px
             }
             with open(calib_file, "w") as f:
                 json.dump(payload, f, indent=2)
@@ -413,6 +437,8 @@ async def get_system_calibration_status(db: Session = Depends(get_db)):
             "camera_id": active_calib.camera_id,
             "mm_per_pixel": round(active_calib.mm_per_pixel_avg, 4),
             "cm_per_pixel": round(active_calib.mm_per_pixel_avg / 10.0, 5),
+            "distance_cm": round(getattr(active_calib, "distance_cm", 50.0) or 50.0, 1),
+            "focal_length_px": round(getattr(active_calib, "focal_length_px", 1000.0) or 1000.0, 1),
             "calibrated_at": active_calib.calibrated_at,
             "notes": active_calib.notes,
             "active_calibration": schema
@@ -422,6 +448,8 @@ async def get_system_calibration_status(db: Session = Depends(get_db)):
         "camera_id": None,
         "mm_per_pixel": 1.25,
         "cm_per_pixel": 0.125,
+        "distance_cm": 50.0,
+        "focal_length_px": 1000.0,
         "calibrated_at": None,
         "notes": "Uncalibrated - using system default fallback scale",
         "active_calibration": None

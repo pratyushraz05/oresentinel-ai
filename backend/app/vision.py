@@ -301,15 +301,15 @@ def detect_boulders_and_measure(
 
                     if is_oversize:
                         color = (0, 0, 240)
-                        label_prefix = f"BOULDER #{rock_idx}: {int(major_mm)}mm [OVERSIZE]"
+                        label_prefix = f"BOULDER #{rock_idx}: {major_mm/10:.1f}cm ({int(major_mm)}mm) [OVERSIZE]"
                         subtext = f"Throat Exceeded ({int(throat_limit_mm)}mm) | Conf: {int(conf*100)}%"
                     elif is_warning:
                         color = (0, 180, 255)
-                        label_prefix = f"ROCK #{rock_idx}: {int(major_mm)}mm [WARNING]"
+                        label_prefix = f"ROCK #{rock_idx}: {major_mm/10:.1f}cm ({int(major_mm)}mm) [WARNING]"
                         subtext = f"Near-Limit / High Aspect ({aspect_ratio}) | Conf: {int(conf*100)}%"
                     else:
                         color = (80, 210, 80)
-                        label_prefix = f"ROCK #{rock_idx}: {int(major_mm)}mm"
+                        label_prefix = f"ROCK #{rock_idx}: {major_mm/10:.1f}cm ({int(major_mm)}mm)"
                         subtext = f"Normal Fragment | Conf: {int(conf*100)}%"
 
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
@@ -376,15 +376,15 @@ def detect_boulders_and_measure(
             # Drawing annotations
             if is_oversize:
                 color = (0, 0, 240)  # Red (BGR)
-                label_prefix = f"CRITICAL BOULDER #{rock_idx}: {int(major_mm)}mm"
+                label_prefix = f"CRITICAL BOULDER #{rock_idx}: {major_mm/10:.1f}cm ({int(major_mm)}mm)"
                 subtext = f"EXCEEDS THROAT ({int(throat_limit_mm)}mm) | Mass ~{int(mass_kg)}kg"
             elif major_mm >= CONFIG.warning_threshold_mm:
                 color = (0, 180, 255)  # Orange/Amber (BGR)
-                label_prefix = f"NEAR-LIMIT ROCK #{rock_idx}: {int(major_mm)}mm"
+                label_prefix = f"NEAR-LIMIT ROCK #{rock_idx}: {major_mm/10:.1f}cm ({int(major_mm)}mm)"
                 subtext = f"Warning Zone | Aspect {aspect_ratio}"
             else:
                 color = (80, 210, 80)  # Green (BGR)
-                label_prefix = f"ROCK #{rock_idx}: {int(major_mm)}mm"
+                label_prefix = f"ROCK #{rock_idx}: {major_mm/10:.1f}cm ({int(major_mm)}mm)"
                 subtext = f"Normal Fragment | {int(confidence*100)}%"
 
             # Draw box and contours
@@ -798,7 +798,8 @@ def detect_frame_in_memory(
     calibration_scale: float = 1.0,
     throat_limit_mm: float = None,
     warning_threshold_mm: float = None,
-    source_id: str = None
+    source_id: str = None,
+    distance_cm: float = None
 ) -> tuple[list[dict], float, str]:
     """
     Rapid in-memory detection for real-time video streaming loops.
@@ -820,10 +821,14 @@ def detect_frame_in_memory(
         calibration = get_active_system_calibration()
 
     if calibration:
-        mm_per_pixel = calibration.mm_per_pixel_avg
+        if distance_cm and distance_cm > 0 and hasattr(calibration, "scale_at_distance"):
+            mm_per_pixel = calibration.scale_at_distance(distance_cm)
+            print(f"[CALIB] Using pinhole scaled calibration at {distance_cm}cm: {mm_per_pixel:.4f} mm/px ({(mm_per_pixel/10.0):.4f} cm/px)")
+        else:
+            mm_per_pixel = calibration.mm_per_pixel_avg
+            print(f"[CALIB] Using calibrated scale for live feed {source_id or 'webcam'}: {mm_per_pixel:.4f} mm/px ({(mm_per_pixel/10.0):.4f} cm/px)")
         if calibration_scale and calibration_scale != 1.0:
             mm_per_pixel *= float(calibration_scale)
-        print(f"[CALIB] Using calibrated scale for live feed {source_id or 'webcam'}: {mm_per_pixel:.4f} mm/px ({(mm_per_pixel/10.0):.4f} cm/px)")
     else:
         # Standard conveyor width calibration (1600mm across frame width)
         mm_per_pixel = (1600.0 / float(w)) * float(calibration_scale)
@@ -1053,27 +1058,15 @@ def detect_frame_in_memory(
             salient_obj = detect_full_salient_object(img, mm_per_pixel, throat_limit_mm, warning_threshold_mm)
             if salient_obj:
                 if source_id == "CAM-WEBCAM-MEASURE":
-                    # Place full salient object as primary detection.
-                    # CRITICAL FIX: Eliminate any sub-boxes/fragments that overlap with the salient object!
-                    sbx, sby, sbw, sbh = salient_obj["bbox"]
-                    non_overlapping = []
-                    for d in detections:
-                        dbx, dby, dbw, dbh = d["bbox"]
-                        ix1 = max(sbx, dbx)
-                        iy1 = max(sby, dby)
-                        ix2 = min(sbx + sbw, dbx + dbw)
-                        iy2 = min(sby + sbh, dby + dbh)
-                        if ix2 > ix1 and iy2 > iy1:
-                            inter = (ix2 - ix1) * (iy2 - iy1)
-                            d_area = dbw * dbh
-                            if d_area > 0 and (inter / d_area) > 0.30:
-                                continue  # Suppress internal fragment
-                        non_overlapping.append(d)
-                    detections = [salient_obj] + non_overlapping
-                    for i, d in enumerate(detections, 1):
-                        d["rock_index"] = i
+                    # For physical object measurement: strictly present as ONE complete object rectangular box
+                    detections = [salient_obj]
                 elif len(detections) == 0:
                     detections.append(salient_obj)
+            elif source_id == "CAM-WEBCAM-MEASURE" and len(detections) > 0:
+                # If salient detector did not fire but other detector found objects, isolate the largest single object
+                detections.sort(key=lambda d: d["bbox"][2] * d["bbox"][3], reverse=True)
+                detections = [detections[0]]
+                detections[0]["rock_index"] = 1
 
     # Final global containment suppression: if any smaller box is inside a larger boulder, discard it
     if len(detections) > 1:

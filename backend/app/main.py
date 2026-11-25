@@ -24,7 +24,6 @@ from .risk_engine import assess_operational_risk
 from .analytics import get_analytics_kpi_summary, get_trend_analytics
 from .copilot import process_copilot_query
 from .seed_data import seed_database
-from .roomscale_api import router as roomscale_router
 from .measurement_api import router as measurement_router
 
 # Create database tables
@@ -48,14 +47,28 @@ app.add_middleware(
 # Mount media static files directory
 app.mount("/media", StaticFiles(directory=str(DATA_DIR)), name="media")
 
-# Mount RoomScale API router
-app.include_router(roomscale_router)
-
 # Mount Measurement API router
 app.include_router(measurement_router)
 
 @app.on_event("startup")
 def startup_event():
+    # Ensure camera_calibrations has distance_cm and focal_length_px columns
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            try:
+                conn.execute(text("ALTER TABLE camera_calibrations ADD COLUMN distance_cm FLOAT DEFAULT 50.0"))
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE camera_calibrations ADD COLUMN focal_length_px FLOAT DEFAULT 1000.0"))
+                conn.commit()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     db = next(get_db())
     try:
         seed_database(db)
@@ -345,6 +358,7 @@ async def process_realtime_frame(
     throat_limit_mm: float = Form(800.0),
     auto_create_incident: bool = Form(True),
     source_id: str = Form("CAM-01-WEBCAM"),
+    distance_cm: Optional[float] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -366,7 +380,8 @@ async def process_realtime_frame(
         calibration_scale=calibration_scale,
         throat_limit_mm=throat_limit_mm,
         warning_threshold_mm=CONFIG.warning_threshold_mm,
-        source_id=source_id
+        source_id=source_id,
+        distance_cm=distance_cm
     )
 
     alert_triggered = severity in ["CRITICAL_OVERSIZE", "HIGH_RISK"]

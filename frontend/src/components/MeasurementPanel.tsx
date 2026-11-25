@@ -22,9 +22,12 @@ interface MeasurementPanelProps {
   isAdjustingBox?: boolean;
   setIsAdjustingBox?: (val: boolean) => void;
   customBox?: [number, number, number, number] | null;
-  onDirectRecalibrate?: (actualWidthCm: number, actualHeightCm: number) => Promise<any>;
+  onDirectRecalibrate?: (actualWidthCm: number, actualHeightCm: number, distanceCm?: number) => Promise<any>;
   recalibrationCount?: number;
   calibMmPerPx?: number;
+  objectDistanceCm?: number;
+  setObjectDistanceCm?: (d: number) => void;
+  onMeasureNextObject?: () => void;
 }
 
 export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
@@ -43,6 +46,9 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
   onDirectRecalibrate,
   recalibrationCount = 0,
   calibMmPerPx = 0.8,
+  objectDistanceCm = 50,
+  setObjectDistanceCm,
+  onMeasureNextObject,
 }) => {
   const [showCorrection, setShowCorrection] = useState(false);
   const [correctionWidth, setCorrectionWidth] = useState("");
@@ -51,10 +57,12 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
   const [saving, setSaving] = useState(false);
   const [recalibrating, setRecalibrating] = useState(false);
   const [recalibrationSuccess, setRecalibrationSuccess] = useState<string | null>(null);
+  const [userConfirmed, setUserConfirmed] = useState(false);
 
   // Recalibration inputs in Centimeters (cm)
   const [actualWidthCmInput, setActualWidthCmInput] = useState<string>("");
   const [actualHeightCmInput, setActualHeightCmInput] = useState<string>("");
+  const [distanceCmInput, setDistanceCmInput] = useState<string>((objectDistanceCm || 50).toString());
 
   const [stats, setStats] = useState<MeasurementStats | null>(null);
   const [showStats, setShowStats] = useState(false);
@@ -82,6 +90,7 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
     if (!onDirectRecalibrate) return;
     const wCm = parseFloat(actualWidthCmInput);
     const hCm = parseFloat(actualHeightCmInput);
+    const dCm = parseFloat(distanceCmInput) || objectDistanceCm || 50;
 
     if (isNaN(wCm) || isNaN(hCm) || wCm <= 0 || hCm <= 0) {
       alert("Please enter valid width and height in centimeters (e.g. 25.0 cm).");
@@ -91,9 +100,13 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
     setRecalibrating(true);
     setRecalibrationSuccess(null);
     try {
-      await onDirectRecalibrate(wCm, hCm);
-      setRecalibrationSuccess(`Iteration #${recalibrationCount + 1} calibrated successfully! Scale updated to ${((calibMmPerPx || 0.8) / 10).toFixed(4)} cm/px.`);
-      setTimeout(() => setRecalibrationSuccess(null), 6000);
+      if (setObjectDistanceCm && dCm > 0) {
+        setObjectDistanceCm(dCm);
+      }
+      await onDirectRecalibrate(wCm, hCm, dCm);
+      setUserConfirmed(true);
+      setRecalibrationSuccess(`Iteration #${recalibrationCount + 1} calibrated successfully! Physical scale updated at ${dCm} cm.`);
+      setTimeout(() => setRecalibrationSuccess(null), 8000);
     } catch (err: any) {
       alert(`Recalibration failed: ${err.message || "Unknown error"}`);
     } finally {
@@ -306,34 +319,78 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
         </div>
       </div>
 
-      {/* Verification: User feedback on bounding box correctness */}
-      <div className="p-3 bg-[#0a1b18] border border-emerald-700/60 rounded-xl space-y-2.5">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
-          <Target className="w-4 h-4 text-emerald-400" />
-          <span>Object Detection Verification</span>
+      {/* Verification: User feedback on measurement and bounding box correctness */}
+      <div className="p-4 bg-[#0a1f1b] border-2 border-emerald-500 rounded-xl space-y-3 shadow-lg">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs font-bold text-emerald-300 uppercase tracking-wider font-mono">
+            <Target className="w-4 h-4 text-emerald-400" />
+            <span>System Measurement Verification</span>
+          </div>
+          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-950 border border-emerald-700 text-emerald-300">
+            Distance: {objectDistanceCm} cm
+          </span>
         </div>
-        <p className="text-xs text-slate-300">
-          Is the system circling or framing this object correctly?
-        </p>
-        <div className="flex gap-2">
-          <button
-            onClick={() => handleSubmitCorrection(true, true)}
-            disabled={saving}
-            className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow"
-          >
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            Yes, Box is Correct
-          </button>
-          <button
-            onClick={() => {
-              if (setIsAdjustingBox) setIsAdjustingBox(true);
-            }}
-            className="flex-1 py-2 px-3 bg-cyan-700 hover:bg-cyan-600 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            Adjust / Redraw Box
-          </button>
+
+        <div className="text-xs text-slate-200">
+          According to the system, the measurement is:
+          <div className="mt-1 text-base font-bold text-white font-mono bg-black/50 px-3 py-2 rounded-lg border border-emerald-900 flex items-center justify-between">
+            <span>Width: <strong className="text-emerald-400">{(measurement.predictedWidthMm / 10).toFixed(1)} cm</strong></span>
+            <span className="text-slate-500">×</span>
+            <span>Height: <strong className="text-emerald-400">{(measurement.predictedHeightMm / 10).toFixed(1)} cm</strong></span>
+          </div>
         </div>
+
+        {!userConfirmed ? (
+          <>
+            <p className="text-xs text-slate-300 font-medium">
+              Is this measurement correct for the object?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  await handleSubmitCorrection(true, true);
+                  setUserConfirmed(true);
+                }}
+                disabled={saving}
+                className="flex-1 py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Yes, It&apos;s Correct
+              </button>
+              <button
+                onClick={() => {
+                  if (setIsAdjustingBox) setIsAdjustingBox(true);
+                }}
+                className="flex-1 py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs rounded-xl border border-slate-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow"
+              >
+                <Edit3 className="w-4 h-4 text-amber-400" />
+                No, It&apos;s Wrong (Adjust)
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="p-3 bg-emerald-950/80 border border-emerald-600 rounded-lg text-xs text-emerald-200 space-y-2.5 animate-in fade-in">
+            <div className="flex items-center gap-2 font-bold text-white">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Measurement Verified &amp; Calibrated!</span>
+            </div>
+            <p className="text-[11px] text-slate-300">
+              Next time another object is kept there, the system will detect it and ask you to confirm again.
+            </p>
+            {onMeasureNextObject && (
+              <button
+                onClick={() => {
+                  setUserConfirmed(false);
+                  onMeasureNextObject();
+                }}
+                className="w-full py-2 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 text-white font-bold text-xs rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Measure Next Object &rarr;</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Interactive Box Adjustment & Continuous Recalibration Section */}
@@ -351,18 +408,18 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
 
           <div className="text-xs text-slate-300 space-y-1">
             <p className="font-medium text-cyan-200">
-              1. Draw the tight rectangle over the object on the camera screen.
+              1. Drag/adjust the rectangle over the object on the camera screen.
             </p>
             <p className="text-slate-400 text-[11px]">
-              2. Enter the actual real-world dimensions below in centimeters.
+              2. Enter the actual real-world size and camera distance below.
             </p>
           </div>
 
-          {/* Actual Dimension Inputs (in Centimeters) */}
-          <div className="grid grid-cols-2 gap-2.5">
+          {/* Actual Dimension Inputs (in Centimeters) & Distance */}
+          <div className="grid grid-cols-3 gap-2">
             <div>
               <label className="text-[11px] font-medium text-slate-300 block mb-1">
-                Actual Width (cm)
+                Actual Width
               </label>
               <div className="relative">
                 <input
@@ -372,15 +429,15 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
                   value={actualWidthCmInput}
                   onChange={(e) => setActualWidthCmInput(e.target.value)}
                   placeholder="e.g. 25.0"
-                  className="w-full px-3 py-2 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-sm focus:border-cyan-400 focus:outline-none"
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-xs focus:border-cyan-400 focus:outline-none"
                 />
-                <span className="absolute right-3 top-2 text-xs font-mono text-cyan-500">cm</span>
+                <span className="absolute right-2 top-1.5 text-[10px] font-mono text-cyan-500">cm</span>
               </div>
             </div>
 
             <div>
               <label className="text-[11px] font-medium text-slate-300 block mb-1">
-                Actual Height (cm)
+                Actual Height
               </label>
               <div className="relative">
                 <input
@@ -390,9 +447,27 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
                   value={actualHeightCmInput}
                   onChange={(e) => setActualHeightCmInput(e.target.value)}
                   placeholder="e.g. 18.0"
-                  className="w-full px-3 py-2 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-sm focus:border-cyan-400 focus:outline-none"
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-xs focus:border-cyan-400 focus:outline-none"
                 />
-                <span className="absolute right-3 top-2 text-xs font-mono text-cyan-500">cm</span>
+                <span className="absolute right-2 top-1.5 text-[10px] font-mono text-cyan-500">cm</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+                Distance
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="1"
+                  min="5"
+                  value={distanceCmInput}
+                  onChange={(e) => setDistanceCmInput(e.target.value)}
+                  placeholder="e.g. 50"
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-cyan-700 rounded-lg text-white font-mono text-xs focus:border-cyan-400 focus:outline-none"
+                />
+                <span className="absolute right-2 top-1.5 text-[10px] font-mono text-cyan-500">cm</span>
               </div>
             </div>
           </div>
@@ -400,7 +475,7 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
           {/* Custom Drawn Box Coordinates Info */}
           {customBox && (
             <div className="p-2 bg-slate-900/80 border border-cyan-800/60 rounded-lg text-[10px] font-mono text-cyan-300 flex justify-between items-center">
-              <span>Target ROI:</span>
+              <span>Selected ROI:</span>
               <span>
                 X:{(customBox[0] * 100).toFixed(0)}% Y:{(customBox[1] * 100).toFixed(0)}% | W:{(customBox[2] * 100).toFixed(0)}% H:{(customBox[3] * 100).toFixed(0)}%
               </span>
@@ -430,7 +505,7 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
               ) : (
                 <>
                   <Zap className="w-4 h-4 fill-current" />
-                  <span>Recalibrate System on This Object</span>
+                  <span>Calibrate System on This Object</span>
                 </>
               )}
             </button>
@@ -440,7 +515,21 @@ export const MeasurementPanel: React.FC<MeasurementPanelProps> = ({
                 onClick={() => setIsAdjustingBox(false)}
                 className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg transition-colors cursor-pointer"
               >
-                ✓ Finish Adjustment &amp; Resume Live Feed
+                &check; Done Adjustment &amp; Resume Stream
+              </button>
+            )}
+
+            {onMeasureNextObject && (
+              <button
+                onClick={() => {
+                  if (setIsAdjustingBox) setIsAdjustingBox(false);
+                  setUserConfirmed(false);
+                  onMeasureNextObject();
+                }}
+                className="w-full py-2 bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer shadow"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Ready for Next Object &rarr;</span>
               </button>
             )}
           </div>

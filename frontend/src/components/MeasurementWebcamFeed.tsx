@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { Camera, Zap, Play, Pause, Sliders, AlertTriangle } from "lucide-react";
+import { Camera, Zap, Play, Pause, Sliders, AlertTriangle, Ruler, ArrowRight } from "lucide-react";
 import { sendRealtimeFrame } from "../api";
 import type { RealtimeFrameResponse, RealtimeDetectionBox } from "../types";
 
@@ -24,6 +24,10 @@ interface MeasurementWebcamFeedProps {
   customBox?: [number, number, number, number] | null;
   setCustomBox?: (box: [number, number, number, number] | null) => void;
   calibMmPerPx?: number;
+  objectDistanceCm?: number;
+  setObjectDistanceCm?: (d: number) => void;
+  hasConfirmedDistance?: boolean;
+  setHasConfirmedDistance?: (b: boolean) => void;
 }
 
 export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
@@ -47,6 +51,10 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
   customBox = null,
   setCustomBox,
   calibMmPerPx = 0.8,
+  objectDistanceCm = 50,
+  setObjectDistanceCm,
+  hasConfirmedDistance = true,
+  setHasConfirmedDistance,
 }) => {
   const [liveFps, setLiveFps] = useState(0);
   const [detectionCount, setDetectionCount] = useState(0);
@@ -175,7 +183,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
         ctx.font = "10px monospace";
         ctx.fillStyle = color;
         ctx.fillText(
-          `W: ${majorCm} cm | H: ${minorCm} cm | ${d.model_name.includes("YOLO") ? "YOLOv8" : "Salient Object"}`,
+          `W: ${majorCm} cm | H: ${minorCm} cm | D: ${objectDistanceCm} cm | ${d.model_name.includes("YOLO") ? "YOLOv8" : "Salient Object"}`,
           x + 6,
           tagY + 4
         );
@@ -306,7 +314,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
 
   // Process frame
   const processFrame = useCallback(async () => {
-    if (!videoRef.current || !isCameraActive || !isProcessingLoop || isSendingRef.current || isAdjustingBox) {
+    if (!videoRef.current || !isCameraActive || !isProcessingLoop || isSendingRef.current || isAdjustingBox || !hasConfirmedDistance) {
       return;
     }
 
@@ -344,6 +352,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
             throatLimitMm,
             autoCreateIncident: false,
             sourceId: "CAM-WEBCAM-MEASURE",
+            distanceCm: objectDistanceCm,
           });
 
           setLiveFps(resp.fps);
@@ -366,7 +375,7 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
     } catch {
       isSendingRef.current = false;
     }
-  }, [isCameraActive, isProcessingLoop, isAdjustingBox, calibrationScale, throatLimitMm, renderOverlay, onFrameResponse]);
+  }, [isCameraActive, isProcessingLoop, isAdjustingBox, hasConfirmedDistance, objectDistanceCm, calibrationScale, throatLimitMm, renderOverlay, onFrameResponse]);
 
   // Main loop
   useEffect(() => {
@@ -444,6 +453,68 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
           className={`absolute inset-0 w-full h-full ${isAdjustingBox ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"} ${isCameraActive ? "block" : "hidden"}`}
         />
 
+        {/* Step 1 Required: Ask user how far the object is kept from the camera */}
+        {isCameraActive && !hasConfirmedDistance && (
+          <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-30 animate-in fade-in">
+            <div className="max-w-md w-full bg-[#071613] border-2 border-emerald-500 rounded-2xl p-6 shadow-2xl space-y-4">
+              <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center mx-auto text-emerald-400">
+                <Ruler className="w-6 h-6 animate-pulse" />
+              </div>
+              <div>
+                <span className="px-2 py-0.5 rounded bg-emerald-950 border border-emerald-600 text-emerald-300 font-mono text-[10px] font-bold uppercase tracking-wider">
+                  Step 1: Distance Setup
+                </span>
+                <h3 className="text-lg font-bold text-white mt-1.5">
+                  How far is the object kept from the camera?
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Enter the approximate distance from your camera lens to the object. The system uses this to calculate physical focal scale.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-center gap-2">
+                <input
+                  type="number"
+                  step="1"
+                  min="5"
+                  max="500"
+                  value={objectDistanceCm}
+                  onChange={(e) => setObjectDistanceCm && setObjectDistanceCm(Math.max(5, parseFloat(e.target.value) || 50))}
+                  className="w-32 px-4 py-2 bg-slate-900 border-2 border-emerald-500 rounded-xl text-center text-xl font-bold font-mono text-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                />
+                <span className="text-base font-bold text-emerald-400 font-mono">cm</span>
+              </div>
+
+              {/* Quick Distance Presets */}
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                {[30, 50, 75, 100, 150].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setObjectDistanceCm && setObjectDistanceCm(d)}
+                    className={`px-3 py-1 rounded-lg text-xs font-mono font-semibold transition-colors cursor-pointer ${
+                      objectDistanceCm === d
+                        ? "bg-emerald-500 text-slate-950 font-bold shadow"
+                        : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                    }`}
+                  >
+                    {d} cm
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setHasConfirmedDistance && setHasConfirmedDistance(true)}
+                className="w-full py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold rounded-xl text-sm transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>Confirm Distance &amp; Start Detection</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Inactive overlay */}
         {!isCameraActive && (
           <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-3 z-10">
@@ -482,6 +553,17 @@ export const MeasurementWebcamFeed: React.FC<MeasurementWebcamFeedProps> = ({
               <div className="bg-black/80 backdrop-blur px-2.5 py-1 rounded-lg text-xs font-mono text-slate-300 border border-slate-700 flex items-center space-x-1.5 shadow-md">
                 <span>DETECTED:</span>
                 <span className="text-emerald-400 font-bold">{detectionCount}</span>
+              </div>
+
+              {/* Clickable Camera Distance Badge */}
+              <div
+                onClick={() => setHasConfirmedDistance && setHasConfirmedDistance(false)}
+                className="bg-black/80 backdrop-blur px-2.5 py-1 rounded-lg text-xs font-mono text-cyan-300 border border-cyan-700/60 flex items-center space-x-1.5 shadow-md cursor-pointer hover:bg-cyan-950/80 pointer-events-auto transition-colors"
+                title="Camera-to-object distance. Click to adjust."
+              >
+                <span>DIST:</span>
+                <span className="font-bold text-white">{objectDistanceCm} cm</span>
+                <span className="text-[10px] text-cyan-400 underline">edit</span>
               </div>
             </div>
 

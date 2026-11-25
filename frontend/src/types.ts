@@ -211,6 +211,8 @@ export interface CameraCalibrationData {
   calibratedAt: string;
   imageWidth: number;
   imageHeight: number;
+  distanceCm?: number;
+  focalLengthPx?: number;
 }
 
 export interface CalibrationRequest {
@@ -227,6 +229,7 @@ export interface DirectCalibrationRequest {
   box: [number, number, number, number];
   actual_width_cm: number;
   actual_height_cm: number;
+  distance_cm?: number;
   image_width?: number;
   image_height?: number;
   notes?: string;

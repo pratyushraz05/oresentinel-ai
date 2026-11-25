@@ -2,7 +2,7 @@ import React from "react";
 import {
   ShieldAlert, Activity, Sliders, PlayCircle,
   Clock, LayoutDashboard, Database, BarChart3, Sparkles,
-  Camera, Ruler, CheckCircle2, AlertTriangle
+  Ruler, CheckCircle2, AlertTriangle
 } from "lucide-react";
 import type { DashboardSummary } from "../types";
 import type { SystemCalibrationStatus } from "../api";
@@ -59,7 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
               title="System-Wide Calibration Active: All ore cameras & specimens use this physical scale. Click to adjust."
             >
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>SCALE: {systemCalibration.cm_per_pixel.toFixed(3)} cm/px ({systemCalibration.mm_per_pixel.toFixed(2)} mm/px)</span>
+              <span>SCALE: {systemCalibration.cm_per_pixel.toFixed(3)} cm/px{systemCalibration.distance_cm ? ` @ ${systemCalibration.distance_cm}cm` : ""} ({systemCalibration.mm_per_pixel.toFixed(2)} mm/px)</span>
             </div>
           ) : (
             <button
@@ -172,18 +172,6 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Sparkles className="w-4 h-4 text-emerald-300" />
             <span>AI Copilot</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("roomscale")}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-              activeTab === "roomscale"
-                ? "bg-teal-700/60 text-teal-200 border border-teal-500/50"
-                : "text-slate-400 hover:text-white hover:bg-[#122823]"
-            }`}
-          >
-            <Camera className="w-4 h-4 text-teal-300" />
-            <span>RoomScale</span>
           </button>
 
           <button
