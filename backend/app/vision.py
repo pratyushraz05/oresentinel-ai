@@ -17,14 +17,18 @@ def get_yolo_model():
         return _yolo_model
     try:
         from ultralytics import YOLO
-        custom_weights = BASE_DIR / "ml" / "weights" / "oresentinel_yolo.pt"
-        if custom_weights.exists():
-            _yolo_model = YOLO(str(custom_weights))
-            return _yolo_model
-        base_weights = BASE_DIR / "ml" / "weights" / "yolov8n.pt"
-        if base_weights.exists():
-            _yolo_model = YOLO(str(base_weights))
-            return _yolo_model
+        candidates = [
+            BASE_DIR.parent / "ml" / "weights" / "oresentinel_yolo.pt",
+            BASE_DIR / "ml" / "weights" / "oresentinel_yolo.pt",
+            BASE_DIR.parent / "ml" / "weights" / "oresentinel_rock_best.pt",
+            BASE_DIR / "ml" / "weights" / "oresentinel_rock_best.pt",
+            BASE_DIR.parent / "ml" / "weights" / "yolov8n.pt",
+            BASE_DIR / "ml" / "weights" / "yolov8n.pt",
+        ]
+        for w in candidates:
+            if w.exists():
+                _yolo_model = YOLO(str(w))
+                return _yolo_model
     except Exception as e:
         pass
     return None

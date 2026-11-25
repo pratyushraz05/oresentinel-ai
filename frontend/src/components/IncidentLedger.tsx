@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { Database, Filter, Eye, X, Sparkles } from "lucide-react";
+import { Database, Filter, Eye, Trash2, X, Sparkles } from "lucide-react";
 import type { Incident } from "../types";
-import { acknowledgeIncident, linkOutcome } from "../api";
+import { acknowledgeIncident, linkOutcome, deleteIncident, purgeIncidents } from "../api";
 
 interface IncidentLedgerProps {
   incidents: Incident[];
@@ -76,6 +76,38 @@ export const IncidentLedger: React.FC<IncidentLedgerProps> = ({
     }
   };
 
+  const handleDeleteIncident = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    if (!window.confirm(`Delete incident #${id} and remove associated media records?`)) {
+      return;
+    }
+    try {
+      await deleteIncident(id);
+      if (selectedIncident?.id === id) {
+        onSelectIncident(null);
+      }
+      onRefresh();
+    } catch (err: any) {
+      alert("Failed to delete incident: " + err.message);
+    }
+  };
+
+  const handlePurgeOldIncidents = async () => {
+    const keepStr = prompt("How many recent incidents would you like to keep? (Enter 0 to purge all past fake/test records):", "0");
+    if (keepStr === null) return;
+    const keep = parseInt(keepStr, 10);
+    const keepNum = isNaN(keep) ? 0 : Math.max(0, keep);
+
+    try {
+      const res = await purgeIncidents(keepNum);
+      alert(`Purge complete: ${res.deleted_incidents} incidents deleted, ${res.deleted_media} media records deleted.`);
+      onSelectIncident(null);
+      onRefresh();
+    } catch (err: any) {
+      alert("Failed to purge incidents: " + err.message);
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Header & Filter Controls */}
@@ -94,7 +126,7 @@ export const IncidentLedger: React.FC<IncidentLedgerProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2">
             <input
               type="text"
               placeholder="Search INC-2026-..."
@@ -102,6 +134,14 @@ export const IncidentLedger: React.FC<IncidentLedgerProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               className="bg-[#071311] border border-[#1b3b33] rounded-xl px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
             />
+            <button
+              onClick={handlePurgeOldIncidents}
+              title="Purge fake/test incidents from database"
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-mono font-medium transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>Purge Fake Incidents</span>
+            </button>
           </div>
         </div>
 
@@ -235,15 +275,25 @@ export const IncidentLedger: React.FC<IncidentLedgerProps> = ({
                     )}
                   </td>
                   <td className="py-3 px-4 text-right">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectIncident(inc);
-                      }}
-                      className="p-1.5 rounded-lg bg-[#0e241f] hover:bg-emerald-700 hover:text-white text-slate-400 transition-colors"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center justify-end space-x-1.5">
+                      <button
+                        title="View incident audit details"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectIncident(inc);
+                        }}
+                        className="p-1.5 rounded-lg bg-[#0e241f] hover:bg-emerald-700 hover:text-white text-slate-400 transition-colors"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button
+                        title="Delete fake / test incident"
+                        onClick={(e) => handleDeleteIncident(e, inc.id)}
+                        className="p-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-700 hover:text-white text-rose-400 border border-rose-800/40 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

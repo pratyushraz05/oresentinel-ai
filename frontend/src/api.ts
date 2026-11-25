@@ -324,3 +324,54 @@ export async function fetchActiveCalibration(): Promise<CameraCalibrationData | 
   const data = await res.json();
   return normalizeCalibrationData(data);
 }
+
+export async function resetDashboardMetrics(overrides?: Record<string, number>): Promise<any> {
+  const res = await fetch(`${BASE_URL}/api/dashboard/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(overrides || {}),
+  });
+  if (!res.ok) throw new Error("Failed to reset dashboard metrics");
+  return res.json();
+}
+
+export async function updateKpiOverrides(overrides: Record<string, number>): Promise<any> {
+  const res = await fetch(`${BASE_URL}/api/dashboard/kpi-overrides`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(overrides),
+  });
+  if (!res.ok) throw new Error("Failed to update KPI overrides");
+  return res.json();
+}
+
+export async function clearKpiOverrides(): Promise<any> {
+  const res = await fetch(`${BASE_URL}/api/dashboard/kpi-overrides`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to clear KPI overrides");
+  return res.json();
+}
+
+export async function getKpiOverrides(): Promise<Record<string, number>> {
+  const res = await fetch(`${BASE_URL}/api/dashboard/kpi-overrides`);
+  if (!res.ok) return {};
+  return res.json();
+}
+
+export async function deleteIncident(incidentId: number): Promise<any> {
+  const res = await fetch(`${BASE_URL}/api/incidents/${incidentId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Failed to delete incident #${incidentId}`);
+  return res.json();
+}
+
+export async function purgeIncidents(keepRecent: number = 0): Promise<any> {
+  const res = await fetch(`${BASE_URL}/api/incidents?keep_recent=${keepRecent}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to purge past incidents");
+  return res.json();
+}
+

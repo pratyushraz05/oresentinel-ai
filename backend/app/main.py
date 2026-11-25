@@ -21,7 +21,10 @@ from .schemas import (
 )
 from .vision import validate_image_quality, detect_boulders_and_measure, detect_frame_in_memory
 from .risk_engine import assess_operational_risk
-from .analytics import get_analytics_kpi_summary, get_trend_analytics
+from .analytics import (
+    get_analytics_kpi_summary, get_trend_analytics,
+    save_kpi_overrides, clear_kpi_overrides, get_kpi_overrides
+)
 from .copilot import process_copilot_query
 from .seed_data import seed_database
 from .measurement_api import router as measurement_router
@@ -183,6 +186,126 @@ def get_incident_detail(incident_id: int, db: Session = Depends(get_db)):
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     return incident
+
+@app.delete("/api/incidents/{incident_id}")
+def delete_incident(incident_id: int, db: Session = Depends(get_db)):
+    """Deletes an individual incident, its detections, outcomes, and audit logs."""
+    inc = db.query(Incident).filter(Incident.id == incident_id).first()
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    db.query(CrusherOutcome).filter(CrusherOutcome.incident_id == incident_id).delete()
+    db.query(AuditLog).filter(AuditLog.incident_id == incident_id).delete()
+    media_id = inc.media_record_id
+    db.delete(inc)
+    db.commit()
+
+    if media_id:
+        db.query(Detection).filter(Detection.media_record_id == media_id).delete()
+        media = db.query(MediaRecord).filter(MediaRecord.id == media_id).first()
+        if media:
+            db.delete(media)
+        db.commit()
+
+    return {"success": True, "message": f"Incident {incident_id} deleted successfully"}
+
+@app.delete("/api/incidents")
+def purge_incidents(
+    keep_recent: int = 0,
+    db: Session = Depends(get_db)
+):
+    """
+    Deletes past incidents. If keep_recent == 0, purges all.
+    If keep_recent > 0, keeps only the most recent N incidents.
+    """
+    all_incs = db.query(Incident).order_by(Incident.created_at.desc()).all()
+    to_delete = all_incs[keep_recent:] if keep_recent > 0 else all_incs
+
+    count = 0
+    for inc in to_delete:
+        db.query(CrusherOutcome).filter(CrusherOutcome.incident_id == inc.id).delete()
+        db.query(AuditLog).filter(AuditLog.incident_id == inc.id).delete()
+        media_id = inc.media_record_id
+        db.delete(inc)
+        if media_id:
+            db.query(Detection).filter(Detection.media_record_id == media_id).delete()
+            media = db.query(MediaRecord).filter(MediaRecord.id == media_id).first()
+            if media:
+                db.delete(media)
+        count += 1
+
+    db.commit()
+    return {"success": True, "deleted_count": count, "message": f"Deleted {count} incidents"}
+
+@app.post("/api/dashboard/reset")
+def reset_dashboard_data(
+    overrides: Optional[dict] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Resets all downtime KPIs and metrics to zero (or custom values),
+    and purges past fake/accumulated incident records and uploaded files.
+    """
+    db.query(CrusherOutcome).delete()
+    db.query(AuditLog).delete()
+    db.query(Incident).delete()
+    db.query(Detection).delete()
+    db.query(MediaRecord).delete()
+    db.commit()
+
+    try:
+        for f in UPLOADS_DIR.glob("*.jpg"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    final_overrides = {
+        "downtime_avoided_hours": 0.0,
+        "downtime_avoided_minutes": 0.0,
+        "cost_avoidance_inr": 0.0,
+        "actual_stoppage_minutes": 0.0,
+        "mean_lead_time_sec": 0.0,
+        "total_incidents": 0,
+        "active_alerts": 0,
+        "critical_count": 0,
+        "high_risk_count": 0,
+        "resolved_count": 0
+    }
+    if overrides:
+        final_overrides.update(overrides)
+
+    save_kpi_overrides(final_overrides)
+    return {
+        "success": True,
+        "message": "System reset to zero. All historical fake data purged and baseline set to 0.",
+        "kpi_summary": get_analytics_kpi_summary(db)
+    }
+
+@app.put("/api/dashboard/kpi-overrides")
+def set_kpi_overrides_endpoint(
+    overrides: dict,
+    db: Session = Depends(get_db)
+):
+    """Allows user to customize each and every KPI data point on the operations dashboard."""
+    saved = save_kpi_overrides(overrides)
+    return {
+        "success": True,
+        "overrides": saved,
+        "kpi_summary": get_analytics_kpi_summary(db)
+    }
+
+@app.delete("/api/dashboard/kpi-overrides")
+def remove_kpi_overrides_endpoint(db: Session = Depends(get_db)):
+    """Clears KPI overrides and reverts to live database calculations."""
+    clear_kpi_overrides()
+    return {
+        "success": True,
+        "message": "KPI overrides cleared",
+        "kpi_summary": get_analytics_kpi_summary(db)
+    }
 
 @app.post("/api/pipeline/demonstration")
 async def run_flagship_demonstration(

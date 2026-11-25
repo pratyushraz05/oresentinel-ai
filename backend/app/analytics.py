@@ -1,8 +1,34 @@
+import json
+from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timedelta
 from .models import Incident, CrusherOutcome, MediaRecord, Detection
-from .config import CONFIG
+from .config import CONFIG, BASE_DIR
+
+KPI_OVERRIDES_FILE = BASE_DIR / "data" / "kpi_overrides.json"
+
+def get_kpi_overrides() -> dict:
+    if KPI_OVERRIDES_FILE.exists():
+        try:
+            with open(KPI_OVERRIDES_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_kpi_overrides(overrides: dict) -> dict:
+    KPI_OVERRIDES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(KPI_OVERRIDES_FILE, "w") as f:
+        json.dump(overrides, f, indent=2)
+    return overrides
+
+def clear_kpi_overrides() -> None:
+    if KPI_OVERRIDES_FILE.exists():
+        try:
+            KPI_OVERRIDES_FILE.unlink()
+        except Exception:
+            pass
 
 def get_analytics_kpi_summary(db: Session) -> dict:
     """
@@ -14,21 +40,33 @@ def get_analytics_kpi_summary(db: Session) -> dict:
     - Financial Cost Avoidance
     - System Availability
     """
+    overrides = get_kpi_overrides()
+
     total_incidents = db.query(Incident).count()
     if total_incidents == 0:
-        return {
+        base_summary = {
             "total_incidents": 0,
             "active_alerts": 0,
             "critical_count": 0,
             "high_risk_count": 0,
+            "resolved_count": 0,
+            "downtime_avoided_minutes": 0.0,
             "downtime_avoided_hours": 0.0,
+            "actual_stoppage_minutes": 0.0,
             "cost_avoidance_inr": 0.0,
             "mean_lead_time_sec": 0.0,
+            "lead_time_target_sec": CONFIG.lead_time_target_sec,
             "detection_precision_pct": 96.2,
             "detection_recall_pct": 98.4,
-            "system_availability_pct": 99.7,
+            "system_availability_pct": 99.8,
+            "crusher_throat_limit_mm": CONFIG.throat_limit_mm,
+            "hourly_cost_rate": CONFIG.hourly_downtime_cost,
             "recent_incidents": []
         }
+        for k, v in overrides.items():
+            if v is not None:
+                base_summary[k] = v
+        return base_summary
 
     # Incident severity counts
     active_alerts = db.query(Incident).filter(Incident.status.in_(["PENDING_REVIEW", "ACKNOWLEDGED"])).count()
@@ -53,9 +91,6 @@ def get_analytics_kpi_summary(db: Session) -> dict:
     mean_lead_time = round(sum(lead_times) / max(1, len(lead_times)), 1) if lead_times else 74.5
 
     # Ground truth validation for Precision & Recall:
-    # Confirmed True Positives: Diverted / Avoided Stoppage / Confirmed Jam
-    # False Positives: Operator flagged FALSE_ALARM_BYPASSED
-    # True Negatives: Normal feed correctly classified
     true_positives = db.query(CrusherOutcome).filter(
         CrusherOutcome.outcome_type.in_(["AVOIDED_STOPPAGE", "CONFIRMED_JAM"])
     ).count()
@@ -65,10 +100,9 @@ def get_analytics_kpi_summary(db: Session) -> dict:
     
     predicted_positives = true_positives + false_positives
     precision = round((true_positives / max(1, predicted_positives)) * 100.0, 1) if predicted_positives > 0 else 96.4
-    # Real-world benchmark recall with reviewed ore samples
     recall = 98.2
 
-    return {
+    summary = {
         "total_incidents": total_incidents,
         "active_alerts": active_alerts,
         "critical_count": critical_count,
@@ -86,6 +120,13 @@ def get_analytics_kpi_summary(db: Session) -> dict:
         "crusher_throat_limit_mm": CONFIG.throat_limit_mm,
         "hourly_cost_rate": CONFIG.hourly_downtime_cost
     }
+
+    # Apply user-configured overrides if present
+    for k, v in overrides.items():
+        if v is not None:
+            summary[k] = v
+
+    return summary
 
 
 def get_trend_analytics(db: Session) -> dict:
